@@ -1,0 +1,56 @@
+:root {
+  --bg: #0e0d0c; --panel: #181614; --line: #2c2824; --text: #e8e2d6; --muted: #8f877b;
+  --accent: #b3261e; --accent-2: #e0463c; --ok: #5f9e5a; --paper: #f4efe4;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, sans-serif; }
+header { display: flex; align-items: baseline; gap: 24px; padding: 14px 24px; border-bottom: 1px solid var(--line); }
+header .logo { font: 700 20px/1 Georgia, serif; letter-spacing: .08em; text-transform: uppercase; color: var(--text); text-decoration: none; }
+header .logo span { color: var(--accent-2); }
+header nav a { color: var(--muted); text-decoration: none; margin-right: 16px; }
+header nav a.on, header nav a:hover { color: var(--text); }
+main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+h1 { font: 700 26px/1.2 Georgia, serif; margin: 0 0 4px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 0 0 10px; }
+a { color: var(--text); }
+.muted { color: var(--muted); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+input, select, textarea, button { font: inherit; color: var(--text); background: #221f1c; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+input[type=checkbox], input[type=range] { padding: 0; accent-color: var(--accent-2); }
+textarea { width: 100%; min-height: 60px; resize: vertical; }
+button { cursor: pointer; background: #2a2622; }
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: var(--accent-2); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td input.tags { width: 100%; background: transparent; border-color: transparent; }
+td input.tags:hover, td input.tags:focus { border-color: var(--line); background: #221f1c; }
+.chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: #2a2622; border: 1px solid var(--line); cursor: pointer; margin: 2px 4px 2px 0; }
+.chip:hover { border-color: var(--accent-2); }
+.error { color: var(--accent-2); }
+
+/* viewer */
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+.at-controls { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px 8px 0 0; }
+.at-controls .play { width: 44px; }
+.at-score { background: var(--paper); color: #111; border-radius: 0 0 8px 8px; min-height: 300px; }
+.at-selection div { background: rgba(179, 38, 30, .15); }
+.at-cursor-bar { background: rgba(179, 38, 30, .08); }
+.at-cursor-beat { background: var(--accent); width: 3px; }
+.at-highlight * { fill: var(--accent); stroke: var(--accent); }
+.side .panel label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 2px; }
+.side .panel input:not([type=checkbox]):not([type=radio]), .side .panel select { width: 100%; }
+.side .panel label.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0; color: var(--text); font-size: 15px; }
+.stat { font-size: 22px; font-weight: 700; }
+.ladder { height: 6px; background: #2a2622; border-radius: 3px; overflow: hidden; margin: 6px 0; }
+.ladder div { height: 100%; background: var(--ok); }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; cursor: pointer; }
+.card.on { border-color: var(--accent-2); }
+.card h3 { margin: 0 0 2px; font-size: 16px; }

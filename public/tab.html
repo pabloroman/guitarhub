@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GuitarHub · Tab</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <a class="logo" href="/">Guitar<span>Hub</span></a>
+  <nav><a href="/">Library</a><a href="/tutor.html">Tutor</a></nav>
+</header>
+<main style="max-width: 1500px">
+  <h1 id="title">Loading…</h1>
+  <p id="meta" class="muted" style="margin-top: 0"></p>
+  <div class="layout">
+    <div class="player">
+      <div class="at-controls"></div>
+      <div class="at-score"></div>
+    </div>
+    <aside class="side">
+      <section class="panel">
+        <h2>Track</h2>
+        <select id="track" aria-label="Track"></select>
+      </section>
+
+      <section class="panel">
+        <h2>Fingering</h2>
+        <p id="fing-status" class="muted" style="margin-top: 0">Loading…</p>
+        <label for="style" style="margin-top: 0">Style</label>
+        <select id="style" style="margin-bottom: 10px">
+          <option value="position">Stay in position (picked melodies, riffs)</option>
+          <option value="string">Stay on one string (tremolo lines)</option>
+        </select>
+        <div id="fing-idle" class="row">
+          <button id="suggest" class="primary">Suggest easier fingering</button>
+          <button id="reset" hidden>Restore original</button>
+        </div>
+        <div id="fing-review" hidden>
+          <div class="row" style="margin: 8px 0">
+            <label class="inline"><input type="radio" name="view" value="to" checked> Suggested</label>
+            <label class="inline"><input type="radio" name="view" value="from"> Original</label>
+          </div>
+          <button id="accept-all" class="primary">Accept all</button>
+          <div class="row" style="margin-top: 8px">
+            <span class="muted">Only bars</span>
+            <input id="acc-from" type="number" min="1" style="width: 70px" aria-label="From bar">
+            <span class="muted">to</span>
+            <input id="acc-to" type="number" min="1" style="width: 70px" aria-label="To bar">
+            <button id="accept-range">Accept</button>
+          </div>
+          <button id="discard" style="margin-top: 8px">Discard suggestion</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Log practice</h2>
+        <form id="log">
+          <div class="row">
+            <div style="flex:1"><label for="bar-from">From bar</label><input id="bar-from" type="number" min="1"></div>
+            <div style="flex:1"><label for="bar-to">To bar</label><input id="bar-to" type="number" min="1"></div>
+          </div>
+          <button type="button" id="from-sel" style="margin-top: 6px">Use loop selection</button>
+          <div class="row">
+            <div style="flex:1"><label for="bpm">Clean at (bpm)</label><input id="bpm" type="number" min="20" max="400"></div>
+            <div style="flex:1"><label for="target">Target (bpm)</label><input id="target" type="number" min="20" max="400"></div>
+          </div>
+          <button type="button" id="cur-bpm" style="margin-top: 6px">Use current player speed</button>
+          <label for="rating">Accuracy</label>
+          <select id="rating">
+            <option value="1">1 · falling apart</option><option value="2">2 · many mistakes</option>
+            <option value="3" selected>3 · some mistakes</option><option value="4">4 · nearly clean</option><option value="5">5 · clean</option>
+          </select>
+          <label for="notes">What felt hard?</label>
+          <textarea id="notes" placeholder="e.g. right hand loses sync on the string change in the tremolo part"></textarea>
+          <div class="row" style="margin-top: 8px; justify-content: space-between">
+            <button class="primary">Save session</button>
+            <a href="/tutor.html" class="muted">Get exercises →</a>
+          </div>
+          <p id="log-msg" class="muted"></p>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>History</h2>
+        <div id="sessions" class="muted">No sessions yet.</div>
+      </section>
+    </aside>
+  </div>
+</main>
+<script type="module">
+import { alphaTab, createPlayer, barsToTex, tuningLabel } from '/player.js';
+import { optimize, STYLES } from '/optimizer.js';
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+const id = new URLSearchParams(location.search).get('id');
+const res = await fetch(`/api/tabs/${id}`);
+if (!res.ok) { $('title').textContent = 'Tab not found'; throw new Error('not found'); }
+const tab = await res.json();
+$('title').textContent = tab.title;
+$('meta').textContent = [tab.artist, tab.tuning, tab.tempo && `${tab.tempo} bpm`, tab.tags].filter(Boolean).join(' · ');
+document.title = `GuitarHub · ${tab.title}`;
+
+const api = createPlayer(document.querySelector('.player'));
+const saved = tab.fingerings; // { trackIndex: [change] }, `from` is always the file's original fingering
+let trackIndex = 0, pending = null, ready = false;
+
+const staff = () => api.score.tracks[trackIndex].staves[0];
+const noteAt = (st, c) => st.bars[c.bar]?.voices[0]?.beats[c.beat]?.notes[c.note];
+const same = (a, b) => a.string === b.string && a.fret === b.fret;
+const key = c => `${c.bar}.${c.beat}.${c.note}`;
+const rerender = () => api.renderScore(api.score, [trackIndex]);
+
+// Move notes to `dir` ('to' | 'from'), only where the note is still where we expect it.
+function apply(st, changes, dir) {
+  for (const c of changes) {
+    const n = noteAt(st, c), expect = dir === 'to' ? c.from : c.to;
+    if (n && same(n, expect)) { n.string = c[dir].string; n.fret = c[dir].fret; }
+  }
+}
+function highlight(st, changes, on) {
+  for (const c of changes) {
+    const n = noteAt(st, c);
+    if (!n) continue;
+    if (on) {
+      n.style = new alphaTab.model.NoteStyle();
+      n.style.colors.set(alphaTab.model.NoteSubElement.GuitarTabFretNumber, alphaTab.model.Color.fromJson('#c0392b'));
+    } else n.style = undefined;
+  }
+}
+// Notes whose technique depends on staying on the same string.
+const locked = n => n.hasBend || n.isHarmonic || n.isTrill || n.isDead || n.slideInType !== 0 || n.slideOutType !== 0
+  || !!n.slideOrigin || n.isTieDestination || n.isTieOrigin || n.isHammerPullOrigin || n.isHammerPullDestination;
+
+api.scoreLoaded.on(score => {
+  if (ready) return;
+  ready = true;
+  for (const [t, changes] of Object.entries(saved)) if (score.tracks[t]) apply(score.tracks[t].staves[0], changes, 'to');
+  const guitars = score.tracks.filter(t => t.staves[0].isStringed && !t.staves[0].isPercussion);
+  $('track').innerHTML = guitars.map(t => `<option value="${t.index}">${esc(t.name || `Track ${t.index + 1}`)} (${esc(tuningLabel(t.staves[0]))})</option>`).join('');
+  trackIndex = guitars[0]?.index ?? 0;
+  $('target').value = score.tempo;
+  if (trackIndex !== 0) api.renderTracks([score.tracks[trackIndex]]);
+  fingStatus();
+});
+api.load(await (await fetch('/files/' + tab.file)).arrayBuffer());
+
+$('track').onchange = e => { if (pending) discard(); trackIndex = +e.target.value; rerender(); fingStatus(); };
+
+// ---------- fingering ----------
+
+function fingStatus() {
+  const n = (saved[trackIndex] ?? []).length;
+  $('fing-status').textContent = n ? `${n} note${n > 1 ? 's' : ''} re-fingered on this track (original file untouched).` : 'Using the original fingering.';
+  $('reset').hidden = !n;
+}
+
+$('suggest').onclick = async () => {
+  $('suggest').disabled = true;
+  $('fing-status').textContent = 'Working out fingerings…';
+  await new Promise(r => setTimeout(r, 30)); // let the message paint before the heavy loop
+  $('suggest').disabled = false;
+  const st = staff(), beats = [], refs = [];
+  st.bars.forEach((bar, b) => bar.voices[0].beats.forEach((beat, i) => {
+    if (beat.isRest || !beat.notes.length) return;
+    refs.push({ bar: b, beat: i, notes: beat.notes, mb: bar.masterBar.index, start: bar.masterBar.start + beat.playbackStart });
+    beats.push(beat.notes.map(n => ({ string: n.string, fret: n.fret, locked: locked(n) })));
+  }));
+  // Seconds from each note to the next: shifting during long notes/rests is cheap, and a new section
+  // (section marker or tempo change) is a free place to move the hand.
+  // ponytail: only tempo changes at the start of a bar count, not mid-bar ones.
+  let tempo = api.score.tempo;
+  const mbs = api.score.masterBars;
+  const barTempo = mbs.map(mb => (tempo = mb.tempoAutomations[0]?.value ?? tempo));
+  const newSection = mbs.map((mb, i) => i > 0 && (!!mb.section || barTempo[i] !== barTempo[i - 1]));
+  const gaps = refs.map((x, i) => {
+    const next = refs[i + 1];
+    if (!next || newSection.slice(x.mb + 1, next.mb + 1).includes(true)) return Infinity;
+    return ((next.start - x.start) * 60) / (960 * barTempo[x.mb]);
+  });
+  const r = optimize({ open: [...st.tuning].reverse(), beats, gaps }, STYLES[$('style').value]);
+  const changes = [];
+  r.beats.forEach((pos, i) => pos.forEach((p, j) => {
+    const n = refs[i].notes[j];
+    if (!same(p, n)) changes.push({ bar: refs[i].bar, beat: refs[i].beat, note: j, from: { string: n.string, fret: n.fret }, to: p });
+  }));
+  if (!changes.length) { $('fing-status').textContent = 'This track already looks comfortable, nothing to suggest.'; return; }
+
+  pending = changes;
+  const bars = [...new Set(changes.map(c => c.bar + 1))];
+  $('fing-status').innerHTML = `<b>${changes.length}</b> notes in <b>${bars.length}</b> bars changed (red).
+    Hand-travel score ${r.before} → <b>${r.after}</b> (−${Math.round((1 - r.after / r.before) * 100)}%).<br>
+    <span class="muted">Bars: ${bars.join(', ')}</span>`;
+  $('acc-from').value = bars[0]; $('acc-to').value = bars.at(-1);
+  apply(st, changes, 'to');
+  highlight(st, changes, true);
+  document.querySelector('input[name=view][value=to]').checked = true;
+  $('fing-idle').hidden = true; $('fing-review').hidden = false;
+  rerender();
+};
+
+document.querySelectorAll('input[name=view]').forEach(r => r.onchange = e => { apply(staff(), pending, e.target.value); rerender(); });
+
+function discard() {
+  apply(staff(), pending, 'from');
+  highlight(staff(), pending, false);
+  pending = null;
+  $('fing-idle').hidden = false; $('fing-review').hidden = true;
+  fingStatus();
+  rerender();
+}
+$('discard').onclick = discard;
+
+async function accept(filter) {
+  const st = staff(), accepted = pending.filter(filter);
+  apply(st, pending, 'from');           // start from the pre-suggestion state…
+  apply(st, accepted, 'to');            // …then keep only what was accepted
+  highlight(st, pending, false);
+  const merged = new Map((saved[trackIndex] ?? []).map(c => [key(c), c]));
+  for (const c of accepted) {
+    const from = merged.get(key(c))?.from ?? c.from;
+    if (same(from, c.to)) merged.delete(key(c)); else merged.set(key(c), { ...c, from });
+  }
+  saved[trackIndex] = [...merged.values()];
+  await fetch(`/api/tabs/${id}/fingerings`, { method: 'PUT', body: JSON.stringify({ track: trackIndex, changes: saved[trackIndex] }) });
+  pending = null;
+  $('fing-idle').hidden = false; $('fing-review').hidden = true;
+  fingStatus();
+  rerender();
+}
+$('accept-all').onclick = () => accept(() => true);
+$('accept-range').onclick = () => {
+  const a = +$('acc-from').value, b = +$('acc-to').value;
+  accept(c => c.bar + 1 >= a && c.bar + 1 <= b);
+};
+$('reset').onclick = async () => {
+  apply(staff(), saved[trackIndex], 'from');
+  saved[trackIndex] = [];
+  await fetch(`/api/tabs/${id}/fingerings`, { method: 'PUT', body: JSON.stringify({ track: trackIndex, changes: [] }) });
+  fingStatus();
+  rerender();
+};
+
+// ---------- practice log ----------
+
+$('from-sel').onclick = () => {
+  const r = api.playbackRange;
+  if (!r) { $('log-msg').textContent = 'Drag across the tab first to select bars.'; return; }
+  const barAt = tick => api.score.masterBars.filter(m => m.start <= tick).at(-1).index + 1;
+  $('bar-from').value = barAt(r.startTick); $('bar-to').value = barAt(r.endTick - 1);
+  $('log-msg').textContent = '';
+};
+$('cur-bpm').onclick = () => { $('bpm').value = api.currentBpm(); };
+
+function renderSessions(list) {
+  $('sessions').innerHTML = list.map(s => `
+    <div style="padding: 6px 0; border-bottom: 1px solid var(--line)">
+      <div style="color: var(--text)">${s.bars ? `Bars ${esc(s.bars)}` : 'Whole song'} · ${s.bpm ?? '?'}/${s.target_bpm ?? '?'} bpm · ${s.rating ?? '?'}/5</div>
+      <div>${esc(s.at.slice(0, 16))}${s.notes ? ` · ${esc(s.notes)}` : ''}</div>
+    </div>`).join('') || 'No sessions yet.';
+}
+renderSessions(tab.sessions);
+
+$('log').onsubmit = async e => {
+  e.preventDefault();
+  const from = +$('bar-from').value || null, to = +$('bar-to').value || from;
+  const excerpt = from ? barsToTex(staff(), from, Math.min(to, from + 7)) : ''; // cap at 8 bars
+  const s = { tab_id: +id, bars: from ? `${from}-${to}` : '', bpm: +$('bpm').value, target_bpm: +$('target').value,
+    rating: +$('rating').value, notes: $('notes').value, excerpt };
+  const r = await fetch('/api/sessions', { method: 'POST', body: JSON.stringify(s) });
+  $('log-msg').textContent = r.ok ? 'Saved. The tutor will use this next time you ask for exercises.' : 'Could not save.';
+  if (r.ok) {
+    $('notes').value = '';
+    renderSessions((await (await fetch(`/api/tabs/${id}`)).json()).sessions);
+  }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GuitarHub · Library</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <a class="logo" href="/">Guitar<span>Hub</span></a>
+  <nav><a href="/" class="on">Library</a><a href="/tutor.html">Tutor</a></nav>
+</header>
+<main>
+  <div class="row" style="justify-content: space-between; margin-bottom: 16px">
+    <h1>Library</h1>
+    <div class="row">
+      <input id="q" type="search" placeholder="Search title, artist, tag…" aria-label="Search" style="width: 280px">
+      <button class="primary" id="upload-btn">Upload .gp3 / .gp5</button>
+      <input id="files" type="file" accept=".gp3,.gp4,.gp5,.gpx,.gp" multiple hidden>
+    </div>
+  </div>
+  <p id="msg" class="muted"></p>
+  <table>
+    <thead><tr><th>Title</th><th>Artist</th><th>Tuning</th><th>Tempo</th><th style="width: 34%">Tags <span class="muted" style="text-transform:none">(comma separated)</span></th><th></th></tr></thead>
+    <tbody id="list"></tbody>
+  </table>
+</main>
+<script type="module">
+import { alphaTab, tuningLabel } from '/player.js';
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+
+async function load() {
+  const tabs = await (await fetch('/api/tabs?q=' + encodeURIComponent($('q').value))).json();
+  $('list').innerHTML = tabs.map(t => `
+    <tr data-id="${t.id}">
+      <td><a href="/tab.html?id=${t.id}">${esc(t.title)}</a></td>
+      <td>${esc(t.artist)}</td>
+      <td class="muted">${esc(t.tuning)}</td>
+      <td class="muted">${t.tempo ?? ''}</td>
+      <td><input class="tags" value="${esc(t.tags)}" aria-label="Tags for ${esc(t.title)}">
+        ${t.tags.split(',').map(s => s.trim()).filter(Boolean).map(s => `<span class="chip">${esc(s)}</span>`).join('')}</td>
+      <td><button class="del" aria-label="Delete ${esc(t.title)}">Delete</button></td>
+    </tr>`).join('') || `<tr><td colspan="6" class="muted">No tabs yet. Upload a Guitar Pro file to start.</td></tr>`;
+}
+
+$('list').addEventListener('change', async e => {
+  if (!e.target.matches('.tags')) return;
+  const id = e.target.closest('tr').dataset.id;
+  await fetch(`/api/tabs/${id}`, { method: 'PATCH', body: JSON.stringify({ tags: e.target.value }) });
+  load();
+});
+$('list').addEventListener('click', async e => {
+  if (e.target.matches('.chip')) { $('q').value = e.target.textContent; return load(); }
+  if (e.target.matches('.del')) {
+    const tr = e.target.closest('tr');
+    if (!confirm(`Delete "${tr.querySelector('a').textContent}"? This removes the file and its fingering edits.`)) return;
+    await fetch(`/api/tabs/${tr.dataset.id}`, { method: 'DELETE' });
+    load();
+  }
+});
+let t; $('q').oninput = () => { clearTimeout(t); t = setTimeout(load, 200); };
+$('upload-btn').onclick = () => $('files').click();
+
+$('files').onchange = async e => {
+  const done = [];
+  for (const file of e.target.files) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let score;
+    try { score = alphaTab.importer.ScoreLoader.loadScoreFromBytes(bytes); }
+    catch { done.push(`<span class="error">${esc(file.name)}: not a readable Guitar Pro file</span>`); continue; }
+    const guitar = score.tracks.find(tr => tr.staves[0].isStringed && !tr.staves[0].isPercussion);
+    const meta = new URLSearchParams({
+      name: file.name,
+      title: score.title || file.name.replace(/\.\w+$/, ''),
+      artist: score.artist || '',
+      tuning: guitar ? tuningLabel(guitar.staves[0]) : '',
+      tempo: score.tempo,
+    });
+    const res = await fetch('/api/tabs?' + meta, { method: 'POST', body: bytes });
+    done.push(res.ok ? `Added ${esc(meta.get('title'))}` : `<span class="error">${esc(file.name)}: upload failed</span>`);
+  }
+  $('msg').innerHTML = done.join(' · ');
+  e.target.value = '';
+  load();
+};
+
+load();
+</script>
+</body>
+</html>

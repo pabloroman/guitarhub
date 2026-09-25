@@ -27,7 +27,7 @@
   </table>
 </main>
 <script type="module">
-import { alphaTab, tuningLabel } from '/player.js';
+import { alphaTab, tuningLabel, guitarTracks } from '/player.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
@@ -71,7 +71,7 @@ $('files').onchange = async e => {
     let score;
     try { score = alphaTab.importer.ScoreLoader.loadScoreFromBytes(bytes); }
     catch { done.push(`<span class="error">${esc(file.name)}: not a readable Guitar Pro file</span>`); continue; }
-    const guitar = score.tracks.find(tr => tr.staves[0].isStringed && !tr.staves[0].isPercussion);
+    const guitar = guitarTracks(score)[0];
     const meta = new URLSearchParams({
       name: file.name,
       title: score.title || file.name.replace(/\.\w+$/, ''),

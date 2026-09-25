@@ -6,6 +6,23 @@ export const noteName = midi => NAMES[midi % 12] + (Math.floor(midi / 12) - 1);
 // staff.tuning is highest string first; show it low -> high like guitarists say it ("D A D G B E")
 export const tuningLabel = staff => staff.tuningName || [...staff.tuning].reverse().map(m => NAMES[m % 12]).join(' ');
 
+// Guitar and bass tracks only: Guitar Pro stores keys, organ, synths etc. as 6-string tracks too.
+// General MIDI programs 24-31 are guitars, 32-39 basses.
+const isStringTrack = t => t.staves[0].isStringed && !t.staves[0].isPercussion;
+export const isGuitar = t => isStringTrack(t) && t.playbackInfo.program >= 24 && t.playbackInfo.program <= 39;
+// Falls back to every stringed track so a tab with odd instrument numbers never ends up with none.
+export const guitarTracks = score => {
+  const g = score.tracks.filter(isGuitar);
+  return g.length ? g : score.tracks.filter(isStringTrack);
+};
+
+// Tempo of every bar (bpm), carrying tempo changes forward.
+// ponytail: only a tempo change at the start of a bar counts, not mid-bar ones.
+export function barTempos(score) {
+  let tempo = score.tempo;
+  return score.masterBars.map(mb => (tempo = mb.tempoAutomations[0]?.value ?? tempo));
+}
+
 // Mounts an alphaTab viewer + player into `root` (expects .at-controls and .at-score inside).
 export function createPlayer(root) {
   const scoreEl = root.querySelector('.at-score');
@@ -28,12 +45,20 @@ export function createPlayer(root) {
     <label><input class="loop" type="checkbox"> Loop</label>
     <label><input class="metro" type="checkbox"> Metronome</label>
     <label><input class="countin" type="checkbox"> Count-in</label>
+    <button class="print" disabled>Print</button>
     <span class="status muted">Loading sound…</span>`;
   const $ = s => c.querySelector(s);
 
+  // Tempo of the passage being played: the bar where the loop selection starts (bar 1 without one).
+  let tempos = [];
+  const baseTempo = () => {
+    const r = api.playbackRange;
+    const bar = r ? api.score.masterBars.filter(m => m.start <= r.startTick).at(-1).index : 0;
+    return tempos[bar] ?? api.score.tempo;
+  };
   const showSpeed = () => {
     const pct = Math.round(api.playbackSpeed * 100);
-    const bpm = api.score ? Math.round(api.score.tempo * api.playbackSpeed) : '';
+    const bpm = api.score ? Math.round(baseTempo() * api.playbackSpeed) : '';
     $('.speed').value = pct;
     $('.speed-out').textContent = `${pct}%${bpm ? ` · ${bpm} bpm` : ''}`;
   };
@@ -43,17 +68,23 @@ export function createPlayer(root) {
     $('.status').textContent = 'Drag across the tab to select a loop range';
   });
   api.playerStateChanged.on(e => { $('.play').textContent = e.state === 1 ? '❚❚' : '▶'; });
-  api.scoreLoaded.on(showSpeed);
+  api.scoreLoaded.on(score => { tempos = barTempos(score); $('.print').disabled = false; showSpeed(); });
+  api.playbackRangeChanged.on(showSpeed);
   $('.play').onclick = () => api.playPause();
   $('.stop').onclick = () => api.stop();
   $('.speed').oninput = e => { api.playbackSpeed = e.target.value / 100; showSpeed(); };
   $('.loop').onchange = e => { api.isLooping = e.target.checked; };
   $('.metro').onchange = e => { api.metronomeVolume = e.target.checked ? 1 : 0; };
   $('.countin').onchange = e => { api.countInVolume = e.target.checked ? 1 : 0; };
+  // alphaTab opens an A4-sized popup with the current track(s) and calls the browser's print dialog
+  $('.print').onclick = () => api.print();
 
-  // set tempo in bpm instead of percent (used by the tutor's tempo ladder)
-  api.setBpm = bpm => { if (api.score) { api.playbackSpeed = bpm / api.score.tempo; showSpeed(); } };
-  api.currentBpm = () => (api.score ? Math.round(api.score.tempo * api.playbackSpeed) : null);
+  api.setSpeed = pct => { api.playbackSpeed = pct / 100; showSpeed(); };
+  api.speedPct = () => Math.round(api.playbackSpeed * 100);
+  // tempo in bpm instead of percent (tutor's tempo ladder, practice log)
+  api.setBpm = bpm => { if (api.score) api.setSpeed((bpm / baseTempo()) * 100); };
+  api.currentBpm = () => (api.score ? Math.round(baseTempo() * api.playbackSpeed) : null);
+  api.setLooping = on => { api.isLooping = on; $('.loop').checked = on; };
   return api;
 }
 

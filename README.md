@@ -3,7 +3,8 @@
 A small local web app for practicing guitar from Guitar Pro tabs:
 
 - **Library**: upload `.gp3` / `.gp4` / `.gp5` / `.gpx` / `.gp` files, then tag and search them.
-- **Player**: renders the tab and plays it back. You can set the speed in bpm, drag across bars to loop them, and turn on a metronome and count-in.
+- **Player**: renders the tab and plays it back. You can set the speed in bpm, drag across bars to loop them, and turn on a metronome and count-in. The **Print** button opens a page-sized version of the current track to print or save as a PDF.
+- **Speed trainer**: loops the selected bars and raises the tempo every few loops, e.g. from 70% to 100% in 5% steps every 3 loops. A **Too fast** button drops back one step.
 - **Fingering optimizer**: suggests easier fingerings, for example keeping a phrase in one hand position instead of jumping around the neck. You review the suggestions bar by bar and accept the ones you like. Accepted changes are stored separately, so your original file is never modified.
 - **Tutor**: log what you practiced (bars, clean tempo, what felt hard) and get exercises built from those passages. Each exercise has a tempo ladder: mark a run "clean" and the tempo goes up 5 bpm.
 

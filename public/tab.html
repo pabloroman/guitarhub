@@ -55,6 +55,25 @@
       </section>
 
       <section class="panel">
+        <h2>Speed trainer</h2>
+        <p class="muted" style="margin-top: 0">Loops the selected bars and speeds up every few loops.</p>
+        <div class="row">
+          <div style="flex:1"><label for="tr-from">Start %</label><input id="tr-from" type="number" min="25" max="150" step="5" value="70"></div>
+          <div style="flex:1"><label for="tr-target">Target %</label><input id="tr-target" type="number" min="25" max="150" step="5" value="100"></div>
+        </div>
+        <div class="row">
+          <div style="flex:1"><label for="tr-step">Step %</label><input id="tr-step" type="number" min="1" max="50" value="5"></div>
+          <div style="flex:1"><label for="tr-every">Every N loops</label><input id="tr-every" type="number" min="1" max="20" value="3"></div>
+        </div>
+        <div class="row" style="margin-top: 10px">
+          <button id="tr-start" class="primary">Start</button>
+          <button id="tr-slower" hidden>Too fast</button>
+          <button id="tr-stop" hidden>Stop</button>
+        </div>
+        <p id="tr-status" class="muted" role="status"></p>
+      </section>
+
+      <section class="panel">
         <h2>Log practice</h2>
         <form id="log">
           <div class="row">
@@ -90,7 +109,7 @@
   </div>
 </main>
 <script type="module">
-import { alphaTab, createPlayer, barsToTex, tuningLabel } from '/player.js';
+import { alphaTab, createPlayer, barsToTex, tuningLabel, guitarTracks, barTempos } from '/player.js';
 import { optimize, STYLES } from '/optimizer.js';
 
 const $ = id => document.getElementById(id);
@@ -138,7 +157,7 @@ api.scoreLoaded.on(score => {
   if (ready) return;
   ready = true;
   for (const [t, changes] of Object.entries(saved)) if (score.tracks[t]) apply(score.tracks[t].staves[0], changes, 'to');
-  const guitars = score.tracks.filter(t => t.staves[0].isStringed && !t.staves[0].isPercussion);
+  const guitars = guitarTracks(score);
   $('track').innerHTML = guitars.map(t => `<option value="${t.index}">${esc(t.name || `Track ${t.index + 1}`)} (${esc(tuningLabel(t.staves[0]))})</option>`).join('');
   trackIndex = guitars[0]?.index ?? 0;
   $('target').value = score.tempo;
@@ -170,10 +189,7 @@ $('suggest').onclick = async () => {
   }));
   // Seconds from each note to the next: shifting during long notes/rests is cheap, and a new section
   // (section marker or tempo change) is a free place to move the hand.
-  // ponytail: only tempo changes at the start of a bar count, not mid-bar ones.
-  let tempo = api.score.tempo;
-  const mbs = api.score.masterBars;
-  const barTempo = mbs.map(mb => (tempo = mb.tempoAutomations[0]?.value ?? tempo));
+  const mbs = api.score.masterBars, barTempo = barTempos(api.score);
   const newSection = mbs.map((mb, i) => i > 0 && (!!mb.section || barTempo[i] !== barTempo[i - 1]));
   const gaps = refs.map((x, i) => {
     const next = refs[i + 1];
@@ -242,6 +258,48 @@ $('reset').onclick = async () => {
   fingStatus();
   rerender();
 };
+
+// ---------- speed trainer ----------
+
+let trainer = null; // { loops } while running
+const num = (id, min) => Math.max(min, Math.round(+$(id).value) || min);
+function trainerStatus(msg) {
+  if (msg) $('tr-status').textContent = msg;
+  else if (!trainer) $('tr-status').textContent = api.playbackRange ? '' : 'Tip: drag across bars to pick a passage, otherwise the whole song loops.';
+  else {
+    const pct = api.speedPct(), speed = `${pct}% (${api.currentBpm()} bpm)`;
+    $('tr-status').textContent = pct >= num('tr-target', 25) ? `Target reached at ${speed}: keep going or log it.`
+      : `Loop ${trainer.loops + 1} of ${num('tr-every', 1)} · ${speed}`;
+  }
+}
+function trainerRunning(on) {
+  $('tr-start').hidden = on; $('tr-stop').hidden = $('tr-slower').hidden = !on;
+}
+$('tr-start').onclick = () => {
+  api.setLooping(true);
+  api.setSpeed(num('tr-from', 25));
+  if (!api.play()) return trainerStatus('The sound is still loading, try again in a moment.');
+  trainer = { loops: 0 };
+  trainerRunning(true);
+  trainerStatus();
+};
+$('tr-stop').onclick = () => { trainer = null; api.stop(); trainerRunning(false); trainerStatus(); };
+$('tr-slower').onclick = () => {
+  trainer.loops = 0;
+  api.setSpeed(Math.max(25, api.speedPct() - num('tr-step', 1)));
+  trainerStatus();
+};
+// fires at the end of every loop; reads the current speed, so manual slider changes become the new level
+api.playerFinished.on(() => {
+  if (!trainer) return;
+  if (++trainer.loops >= num('tr-every', 1)) {
+    trainer.loops = 0;
+    api.setSpeed(Math.min(num('tr-target', 25), api.speedPct() + num('tr-step', 1)));
+  }
+  trainerStatus();
+});
+api.playbackRangeChanged.on(() => trainerStatus());
+trainerStatus();
 
 // ---------- practice log ----------
 

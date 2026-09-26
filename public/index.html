@@ -16,8 +16,8 @@
     <h1>Library</h1>
     <div class="row">
       <input id="q" type="search" placeholder="Search title, artist, tag…" aria-label="Search" style="width: 280px">
-      <button class="primary" id="upload-btn">Upload .gp3 / .gp5</button>
-      <input id="files" type="file" accept=".gp3,.gp4,.gp5,.gpx,.gp" multiple hidden>
+      <button class="primary" id="upload-btn">Upload .gp / .pdf</button>
+      <input id="files" type="file" accept=".gp3,.gp4,.gp5,.gpx,.gp,.pdf" multiple hidden>
     </div>
   </div>
   <p id="msg" class="muted"></p>
@@ -26,8 +26,25 @@
     <tbody id="list"></tbody>
   </table>
 </main>
+<dialog id="pdf-dlg" aria-labelledby="pdf-dlg-h">
+  <form method="dialog">
+    <h2 id="pdf-dlg-h">Check the converted PDF</h2>
+    <div class="row">
+      <label>Title <input id="pdf-title" required></label>
+      <label>Artist <input id="pdf-artist"></label>
+    </div>
+    <p id="pdf-summary" class="muted"></p>
+    <ul id="pdf-warnings"></ul>
+    <div class="at-score" id="pdf-preview"></div>
+    <div class="row" style="justify-content: flex-end; margin-top: 12px">
+      <button value="cancel" formnovalidate>Skip</button>
+      <button value="save" class="primary">Add to library</button>
+    </div>
+  </form>
+</dialog>
 <script type="module">
 import { alphaTab, tuningLabel, guitarTracks } from '/player.js';
+import { pdfToTex } from '/pdftab.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
@@ -64,17 +81,56 @@ $('list').addEventListener('click', async e => {
 let t; $('q').oninput = () => { clearTimeout(t); t = setTimeout(load, 200); };
 $('upload-btn').onclick = () => $('files').click();
 
+// Guitar Pro PDF -> alphaTex -> score, then the player checks it and it's stored as a .gp file like any upload
+async function fromPdf(file) {
+  const pdfjs = await import('/pdfjs/pdf.min.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs';
+  const r = await pdfToTex(pdfjs, new Uint8Array(await file.arrayBuffer()), { name: file.name });
+  const score = alphaTab.importer.ScoreLoader.loadAlphaTex(r.tex);
+
+  const dlg = $('pdf-dlg');
+  $('pdf-title').value = score.title;
+  $('pdf-artist').value = score.artist;
+  const staff = score.tracks[0].staves[0];
+  $('pdf-summary').textContent = `${file.name}: ${score.masterBars.length} bars · ${tuningLabel(staff)} · ${score.tempo} bpm`;
+  $('pdf-warnings').innerHTML = r.warnings.map(w => `<li class="error">${esc(w)}</li>`).join('') ||
+    '<li class="muted">Every bar adds up. Compare with the PDF before adding it.</li>';
+  const api = new alphaTab.AlphaTabApi($('pdf-preview'), {
+    core: { fontDirectory: '/vendor/font/' }, display: { layoutMode: 'Page', scale: 0.8 }, player: { playerMode: 'Disabled' },
+  });
+  api.renderScore(score);
+  dlg.returnValue = '';
+  dlg.showModal();
+  await new Promise(res => dlg.addEventListener('close', res, { once: true }));
+  api.destroy();
+  $('pdf-preview').innerHTML = '';
+  if (dlg.returnValue !== 'save') return null;
+  score.title = $('pdf-title').value.trim();
+  score.artist = $('pdf-artist').value.trim();
+  const bytes = new alphaTab.exporter.Gp7Exporter().export(score, new alphaTab.Settings());
+  return { score, bytes, name: `${score.title}.gp` };
+}
+
 $('files').onchange = async e => {
   const done = [];
   for (const file of e.target.files) {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let score;
-    try { score = alphaTab.importer.ScoreLoader.loadScoreFromBytes(bytes); }
-    catch { done.push(`<span class="error">${esc(file.name)}: not a readable Guitar Pro file</span>`); continue; }
+    let score, bytes, name = file.name;
+    if (/\.pdf$/i.test(file.name)) {
+      $('msg').textContent = `Reading ${file.name}…`;
+      let r;
+      try { r = await fromPdf(file); }
+      catch (err) { done.push(`<span class="error">${esc(file.name)}: ${esc(err.message)}</span>`); continue; }
+      if (!r) { done.push(`Skipped ${esc(file.name)}`); continue; }
+      ({ score, bytes, name } = r);
+    } else {
+      bytes = new Uint8Array(await file.arrayBuffer());
+      try { score = alphaTab.importer.ScoreLoader.loadScoreFromBytes(bytes); }
+      catch { done.push(`<span class="error">${esc(file.name)}: not a readable Guitar Pro file</span>`); continue; }
+    }
     const guitar = guitarTracks(score)[0];
     const meta = new URLSearchParams({
-      name: file.name,
-      title: score.title || file.name.replace(/\.\w+$/, ''),
+      name,
+      title: score.title || name.replace(/\.\w+$/, ''),
       artist: score.artist || '',
       tuning: guitar ? tuningLabel(guitar.staves[0]) : '',
       tempo: score.tempo,

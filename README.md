@@ -3,6 +3,7 @@
 A small local web app for practicing guitar from Guitar Pro tabs:
 
 - **Library**: upload `.gp3` / `.gp4` / `.gp5` / `.gpx` / `.gp` files, then tag and search them.
+- **PDF import**: upload a PDF exported from Guitar Pro (standard notation + tab) and it's converted into a playable tab. You check the result before it's added. Scanned pages and screenshots can't be read.
 - **Player**: renders the tab and plays it back. You can set the speed in bpm, drag across bars to loop them, and turn on a metronome and count-in. The **Print** button opens a page-sized version of the current track to print or save as a PDF.
 - **Speed trainer**: loops the selected bars and raises the tempo every few loops, e.g. from 70% to 100% in 5% steps every 3 loops. A **Too fast** button drops back one step.
 - **Fingering optimizer**: suggests easier fingerings, for example keeping a phrase in one hand position instead of jumping around the neck. You review the suggestions bar by bar and accept the ones you like. Accepted changes are stored separately, so your original file is never modified.
@@ -36,7 +37,7 @@ Your tabs, fingering edits and practice log are stored in `data/`, which is crea
 npm test
 ```
 
-The tests cover the fingering optimizer. They include a few real passages where a player's preferred fingering is used as the expected answer.
+The tests cover the fingering optimizer and the PDF import. The optimizer tests include a few real passages where a player's preferred fingering is used as the expected answer. The PDF tests convert the Guitar Pro exports in `test/fixtures/`.
 
 ## How the fingering optimizer works
 
@@ -60,3 +61,17 @@ The weights are at the top of `optimizer.js`. They're tuned against the test cas
 - Node's built-in `http` and `sqlite` modules, with no framework.
 - Plain HTML and JavaScript, with no build step.
 - [alphaTab](https://alphatab.net) for parsing, rendering and playing the tabs.
+
+## How the PDF import works
+
+`public/pdftab.js` doesn't look at the page as an image. A Guitar Pro PDF is made of drawing commands, and it reads those back:
+
+- **Fret numbers** are text; the tab line each one sits on gives the string, and numbers at the same x form a chord.
+- **Rhythm** comes from the standard notation above the tab: hollow or filled noteheads, stems, the number of beams or flags, dots, and italic tuplet numbers with their brackets.
+- **Bar lines and repeat dots** mark bars and repeats; the "3x" above a closing repeat is the repeat count.
+- **Tempo** ("= 120"), **tuning** ("Standard tuning", "Drop D tuning", …), **title** and **artist** come from the text at the top of the first page.
+- The time signature is worked out from the bar lengths. Bars that are a different length from most others are listed as warnings.
+
+The result is written as alphaTex, loaded by alphaTab and saved as a `.gp` file, so everything else in the app works on it the same way as on an uploaded Guitar Pro file.
+
+Not read yet: rests, ties, techniques (bends, slides, hammer-ons, palm mutes…), and PDFs with more than one track.

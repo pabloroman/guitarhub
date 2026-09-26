@@ -76,7 +76,7 @@ button.del:hover:not(:disabled) { color: var(--danger); border-color: transparen
 .help:hover, .help:focus-visible { color: var(--text); border-color: var(--muted); }
 .help .tip { display: none; position: absolute; z-index: 20; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: 240px; padding: 8px 10px; font: 400 13px/1.45 var(--sans); color: var(--text); background: var(--raised); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, .4); }
 .help:hover .tip, .help:focus-visible .tip { display: block; }
-.side .panel + .panel { border-top: 1px solid var(--line); }
+.side .panel:not([hidden]) ~ .panel { border-top: 1px solid var(--line); }
 .unit { position: relative; display: block; }
 .unit input { padding-right: 34px; }
 .unit::after { content: attr(data-unit); position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 13px; pointer-events: none; }

@@ -26,35 +26,6 @@
       </section>
 
       <section class="panel">
-        <h2>Fingering <span class="help" tabindex="0">?<span class="tip" role="tooltip">Suggests easier fingerings, e.g. keeping a phrase in one hand position. You review them bar by bar; your original file is never modified.</span></span></h2>
-        <p id="fing-status" class="muted" style="margin-top: 0">Loading…</p>
-        <label for="style">Style</label>
-        <select id="style" style="margin-bottom: 10px">
-          <option value="position">Stay in position (picked melodies, riffs)</option>
-          <option value="string">Stay on one string (tremolo lines)</option>
-        </select>
-        <div id="fing-idle" class="row">
-          <button id="suggest" class="primary">Suggest easier fingering</button>
-          <button id="reset" hidden>Restore original</button>
-        </div>
-        <div id="fing-review" hidden>
-          <div class="row" style="margin: 8px 0">
-            <label class="inline"><input type="radio" name="view" value="to" checked> Suggested</label>
-            <label class="inline"><input type="radio" name="view" value="from"> Original</label>
-          </div>
-          <button id="accept-all" class="primary">Accept all</button>
-          <div class="row" style="margin-top: 8px">
-            <span class="muted">Only bars</span>
-            <input id="acc-from" type="number" min="1" style="width: 70px" aria-label="From bar">
-            <span class="muted">to</span>
-            <input id="acc-to" type="number" min="1" style="width: 70px" aria-label="To bar">
-            <button id="accept-range">Accept</button>
-          </div>
-          <button id="discard" style="margin-top: 8px">Discard suggestion</button>
-        </div>
-      </section>
-
-      <section class="panel">
         <h2>Speed trainer <span class="help" tabindex="0">?<span class="tip" role="tooltip">Loops the selected bars and speeds up every few loops.</span></span></h2>
         <div class="row">
           <div style="flex:1"><label for="tr-from">Start</label><span class="unit" data-unit="%"><input id="tr-from" type="number" min="25" max="150" step="5" value="70"></span></div>
@@ -103,6 +74,35 @@
       <section class="panel">
         <h2>History</h2>
         <div id="sessions" class="muted">No sessions yet.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Fingering <span class="help" tabindex="0">?<span class="tip" role="tooltip">Suggests easier fingerings, e.g. keeping a phrase in one hand position. You review them bar by bar; your original file is never modified.</span></span></h2>
+        <p id="fing-status" class="muted" style="margin-top: 0">Loading…</p>
+        <label for="style">Style</label>
+        <select id="style" style="margin-bottom: 10px">
+          <option value="position">Stay in position (picked melodies, riffs)</option>
+          <option value="string">Stay on one string (tremolo lines)</option>
+        </select>
+        <div id="fing-idle" class="row">
+          <button id="suggest" class="primary">Suggest easier fingering</button>
+          <button id="reset" hidden>Restore original</button>
+        </div>
+        <div id="fing-review" hidden>
+          <div class="row" style="margin: 8px 0">
+            <label class="inline"><input type="radio" name="view" value="to" checked> Suggested</label>
+            <label class="inline"><input type="radio" name="view" value="from"> Original</label>
+          </div>
+          <button id="accept-all" class="primary">Accept all</button>
+          <div class="row" style="margin-top: 8px">
+            <span class="muted">Only bars</span>
+            <input id="acc-from" type="number" min="1" style="width: 70px" aria-label="From bar">
+            <span class="muted">to</span>
+            <input id="acc-to" type="number" min="1" style="width: 70px" aria-label="To bar">
+            <button id="accept-range">Accept</button>
+          </div>
+          <button id="discard" style="margin-top: 8px">Discard suggestion</button>
+        </div>
       </section>
     </aside>
   </div>
@@ -159,6 +159,7 @@ api.scoreLoaded.on(score => {
   const guitars = guitarTracks(score);
   $('track').innerHTML = guitars.map(t => `<option value="${t.index}">${esc(t.name || `Track ${t.index + 1}`)} (${esc(tuningLabel(t.staves[0]))})</option>`).join('');
   trackIndex = guitars[0]?.index ?? 0;
+  $('track').closest('section').hidden = guitars.length < 2;
   $('target').value = score.tempo;
   if (trackIndex !== 0) api.renderTracks([score.tracks[trackIndex]]);
   fingStatus();

@@ -26,9 +26,9 @@
       </section>
 
       <section class="panel">
-        <h2>Fingering</h2>
+        <h2>Fingering <span class="help" tabindex="0">?<span class="tip" role="tooltip">Suggests easier fingerings, e.g. keeping a phrase in one hand position. You review them bar by bar; your original file is never modified.</span></span></h2>
         <p id="fing-status" class="muted" style="margin-top: 0">Loading…</p>
-        <label for="style" style="margin-top: 0">Style</label>
+        <label for="style">Style</label>
         <select id="style" style="margin-bottom: 10px">
           <option value="position">Stay in position (picked melodies, riffs)</option>
           <option value="string">Stay on one string (tremolo lines)</option>
@@ -55,15 +55,14 @@
       </section>
 
       <section class="panel">
-        <h2>Speed trainer</h2>
-        <p class="muted" style="margin-top: 0">Loops the selected bars and speeds up every few loops.</p>
+        <h2>Speed trainer <span class="help" tabindex="0">?<span class="tip" role="tooltip">Loops the selected bars and speeds up every few loops.</span></span></h2>
         <div class="row">
-          <div style="flex:1"><label for="tr-from">Start %</label><input id="tr-from" type="number" min="25" max="150" step="5" value="70"></div>
-          <div style="flex:1"><label for="tr-target">Target %</label><input id="tr-target" type="number" min="25" max="150" step="5" value="100"></div>
+          <div style="flex:1"><label for="tr-from">Start</label><span class="unit" data-unit="%"><input id="tr-from" type="number" min="25" max="150" step="5" value="70"></span></div>
+          <div style="flex:1"><label for="tr-target">Target</label><span class="unit" data-unit="%"><input id="tr-target" type="number" min="25" max="150" step="5" value="100"></span></div>
         </div>
         <div class="row">
-          <div style="flex:1"><label for="tr-step">Step %</label><input id="tr-step" type="number" min="1" max="50" value="5"></div>
-          <div style="flex:1"><label for="tr-every">Every N loops</label><input id="tr-every" type="number" min="1" max="20" value="3"></div>
+          <div style="flex:1"><label for="tr-step">Step</label><span class="unit" data-unit="%"><input id="tr-step" type="number" min="1" max="50" value="5"></span></div>
+          <div style="flex:1"><label for="tr-every">Every</label><span class="unit" data-unit="loops"><input id="tr-every" type="number" min="1" max="20" value="3"></span></div>
         </div>
         <div class="row" style="margin-top: 10px">
           <button id="tr-start" class="primary">Start</button>
@@ -74,7 +73,7 @@
       </section>
 
       <section class="panel">
-        <h2>Log practice</h2>
+        <h2>Log practice <span class="help" tabindex="0">?<span class="tip" role="tooltip">What you log here is what the tutor builds exercises from.</span></span></h2>
         <form id="log">
           <div class="row">
             <div style="flex:1"><label for="bar-from">From bar</label><input id="bar-from" type="number" min="1"></div>
@@ -82,8 +81,8 @@
           </div>
           <button type="button" id="from-sel" style="margin-top: 6px">Use loop selection</button>
           <div class="row">
-            <div style="flex:1"><label for="bpm">Clean at (bpm)</label><input id="bpm" type="number" min="20" max="400"></div>
-            <div style="flex:1"><label for="target">Target (bpm)</label><input id="target" type="number" min="20" max="400"></div>
+            <div style="flex:1"><label for="bpm">Clean at</label><span class="unit" data-unit="bpm"><input id="bpm" type="number" min="20" max="400"></span></div>
+            <div style="flex:1"><label for="target">Target</label><span class="unit" data-unit="bpm"><input id="target" type="number" min="20" max="400"></span></div>
           </div>
           <button type="button" id="cur-bpm" style="margin-top: 6px">Use current player speed</button>
           <label for="rating">Accuracy</label>
@@ -145,7 +144,7 @@ function highlight(st, changes, on) {
     if (!n) continue;
     if (on) {
       n.style = new alphaTab.model.NoteStyle();
-      n.style.colors.set(alphaTab.model.NoteSubElement.GuitarTabFretNumber, alphaTab.model.Color.fromJson('#c0392b'));
+      n.style.colors.set(alphaTab.model.NoteSubElement.GuitarTabFretNumber, alphaTab.model.Color.fromJson('#3565a8'));
     } else n.style = undefined;
   }
 }
@@ -172,7 +171,7 @@ $('track').onchange = e => { if (pending) discard(); trackIndex = +e.target.valu
 
 function fingStatus() {
   const n = (saved[trackIndex] ?? []).length;
-  $('fing-status').textContent = n ? `${n} note${n > 1 ? 's' : ''} re-fingered on this track (original file untouched).` : 'Using the original fingering.';
+  $('fing-status').textContent = n ? `${n} note${n > 1 ? 's' : ''} re-fingered on this track.` : 'Using the original fingering.';
   $('reset').hidden = !n;
 }
 
@@ -206,7 +205,7 @@ $('suggest').onclick = async () => {
 
   pending = changes;
   const bars = [...new Set(changes.map(c => c.bar + 1))];
-  $('fing-status').innerHTML = `<b>${changes.length}</b> notes in <b>${bars.length}</b> bars changed (red).
+  $('fing-status').innerHTML = `<b>${changes.length}</b> notes in <b>${bars.length}</b> bars changed (blue).
     Hand-travel score ${r.before} → <b>${r.after}</b> (−${Math.round((1 - r.after / r.before) * 100)}%).<br>
     <span class="muted">Bars: ${bars.join(', ')}</span>`;
   $('acc-from').value = bars[0]; $('acc-to').value = bars.at(-1);

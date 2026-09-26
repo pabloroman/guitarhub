@@ -23,7 +23,8 @@ db.exec(`
   PRAGMA foreign_keys = ON;
 `);
 
-const STATIC = { '/vendor/': 'node_modules/@coderline/alphatab/dist/', '/files/': TABS_DIR + '/', '/': 'public/' };
+const STATIC = { '/vendor/': 'node_modules/@coderline/alphatab/dist/', '/pdfjs/': 'node_modules/pdfjs-dist/legacy/build/',
+  '/files/': TABS_DIR + '/', '/': 'public/' };
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.sf2': 'application/octet-stream', '.woff2': 'font/woff2', '.woff': 'font/woff', '.otf': 'font/otf', '.svg': 'image/svg+xml' };
 

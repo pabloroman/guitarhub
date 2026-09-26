@@ -85,3 +85,10 @@ td input.tags:hover, td input.tags:focus { border-color: var(--line); background
 .card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; cursor: pointer; }
 .card.on { border-color: var(--accent); }
 .card h3 { margin: 0 0 2px; font: 600 17px/1.3 var(--serif); }
+
+/* PDF import check */
+dialog { width: min(1100px, 96vw); max-height: 92vh; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 20px; }
+dialog::backdrop { background: rgba(0, 0, 0, .6); }
+dialog label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+dialog ul { padding-left: 20px; margin: 8px 0 12px; }
+#pdf-preview { max-height: 60vh; overflow: auto; border-radius: 8px; }

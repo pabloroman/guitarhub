@@ -33,10 +33,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-td input.tags { width: 100%; background: transparent; border-color: transparent; }
-td input.tags:hover, td input.tags:focus { border-color: var(--line); background: var(--field); }
-.chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--raised); border: 1px solid var(--line); cursor: pointer; margin: 2px 4px 2px 0; }
-.chip:hover { border-color: var(--accent); }
+.chip { display: inline-flex; align-items: center; font-size: 12px; line-height: 20px; border-radius: 99px; background: var(--raised); border: 1px solid var(--line); margin: 2px 4px 2px 0; vertical-align: middle; }
+.chip button { font-size: inherit; line-height: inherit; font-weight: 400; border: 0; padding: 0 4px 0 9px; border-radius: 99px; }
+.chip .untag { padding: 0 8px 0 2px; color: var(--muted); }
+.chip button:hover:not(:disabled) { background: transparent; color: var(--accent); }
+button.chip.add-tag { padding: 0 9px; color: var(--muted); background: transparent; border-style: dashed; }
+@media (hover: hover) { tr:not(:hover) .add-tag:not(:focus-visible) { opacity: 0; } }
+.tag-input { font-size: 12px; padding: 1px 8px; width: 140px; border-radius: 99px; }
+button.icon { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border-color: transparent; color: var(--muted); }
+button.del:hover:not(:disabled) { color: var(--danger); border-color: transparent; }
 .error { color: var(--danger); }
 
 /* viewer */

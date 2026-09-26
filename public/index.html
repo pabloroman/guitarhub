@@ -22,7 +22,7 @@
   </div>
   <p id="msg" class="muted"></p>
   <table>
-    <thead><tr><th>Title</th><th>Artist</th><th>Tuning</th><th>Tempo</th><th style="width: 34%">Tags <span class="muted" style="text-transform:none">(comma separated)</span></th><th></th></tr></thead>
+    <thead><tr><th>Title</th><th>Artist</th><th>Tuning</th><th>Tempo</th><th style="width: 34%">Tags</th><th></th></tr></thead>
     <tbody id="list"></tbody>
   </table>
 </main>
@@ -48,6 +48,8 @@ import { pdfToTex } from '/pdftab.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+const splitTags = s => (s ?? '').split(',').map(t => t.trim()).filter(Boolean);
+const TRASH = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>';
 
 async function load() {
   const tabs = await (await fetch('/api/tabs?q=' + encodeURIComponent($('q').value))).json();
@@ -57,22 +59,32 @@ async function load() {
       <td>${esc(t.artist)}</td>
       <td class="muted">${esc(t.tuning)}</td>
       <td class="muted">${t.tempo ?? ''}</td>
-      <td><input class="tags" value="${esc(t.tags)}" aria-label="Tags for ${esc(t.title)}">
-        ${t.tags.split(',').map(s => s.trim()).filter(Boolean).map(s => `<span class="chip">${esc(s)}</span>`).join('')}</td>
-      <td><button class="del" aria-label="Delete ${esc(t.title)}">Delete</button></td>
+      <td class="tags" data-tags="${esc(t.tags)}">${splitTags(t.tags).map(s => `<span class="chip"><button class="tag" title="Show tabs tagged ${esc(s)}">${esc(s)}</button><button class="untag" aria-label="Remove tag ${esc(s)}">×</button></span>`).join('')}<button class="chip add-tag" aria-label="Add tag to ${esc(t.title)}">+ tag</button></td>
+      <td><button class="del icon" aria-label="Delete ${esc(t.title)}" title="Delete">${TRASH}</button></td>
     </tr>`).join('') || `<tr><td colspan="6" class="muted">No tabs yet. Upload a Guitar Pro file to start.</td></tr>`;
 }
 
-$('list').addEventListener('change', async e => {
-  if (!e.target.matches('.tags')) return;
-  const id = e.target.closest('tr').dataset.id;
-  await fetch(`/api/tabs/${id}`, { method: 'PATCH', body: JSON.stringify({ tags: e.target.value }) });
+async function saveTags(td, tags) {
+  await fetch(`/api/tabs/${td.closest('tr').dataset.id}`, { method: 'PATCH', body: JSON.stringify({ tags: [...new Set(tags)].join(', ') }) });
   load();
-});
+}
 $('list').addEventListener('click', async e => {
-  if (e.target.matches('.chip')) { $('q').value = e.target.textContent; return load(); }
-  if (e.target.matches('.del')) {
-    const tr = e.target.closest('tr');
+  const btn = e.target.closest('button'), td = e.target.closest('td.tags');
+  if (!btn) return;
+  if (btn.matches('.tag')) { $('q').value = btn.textContent; return load(); }
+  if (btn.matches('.untag')) return saveTags(td, splitTags(td.dataset.tags).filter(t => t !== btn.previousElementSibling.textContent));
+  if (btn.matches('.add-tag')) {
+    const input = Object.assign(document.createElement('input'), { className: 'tag-input', placeholder: 'tag, tag…' });
+    input.setAttribute('aria-label', btn.getAttribute('aria-label'));
+    let done = false;
+    const commit = () => { if (done) return; done = true; const add = splitTags(input.value); add.length ? saveTags(td, [...splitTags(td.dataset.tags), ...add]) : load(); };
+    input.onkeydown = ev => { if (ev.key === 'Enter') commit(); if (ev.key === 'Escape') { done = true; load(); } };
+    input.onblur = commit;
+    btn.replaceWith(input);
+    return input.focus();
+  }
+  if (btn.matches('.del')) {
+    const tr = btn.closest('tr');
     if (!confirm(`Delete "${tr.querySelector('a').textContent}"? This removes the file and its fingering edits.`)) return;
     await fetch(`/api/tabs/${tr.dataset.id}`, { method: 'DELETE' });
     load();

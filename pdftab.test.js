@@ -52,6 +52,21 @@ test('stretching exercise: whole-note chords, title and artist from the header',
   assert.equal(bar(staff, 12), '5/3+6/5+7/4+8/6:1');
 });
 
+test('string skipping: Qt-based export that draws each character and notehead as font glyphs', async () => {
+  const { score, staff, warnings } = await convert('string-skipping-tremolo.pdf');
+  assert.equal(score.title, 'String Skipping Tremolo Picking'); // drawn one letter at a time
+  assert.equal(score.artist, 'Simon Smith');
+  assert.equal(score.tempo, 145);
+  assert.deepEqual(warnings, []);
+  assert.equal(staff.bars.length, 4);
+  const x = (n, s) => Array(n).fill(s).join(' ');
+  assert.equal(bar(staff, 1), [x(4, '7/6:16'), x(4, '9/4:16'), x(4, '7/6:16'), x(4, '7/3:16')].join(' '));
+  assert.equal(bar(staff, 2), [x(4, '7/6:16'), x(4, '10/4:16'), x(4, '7/6:16'), x(2, '8/2:16'), x(2, '7/2:16')].join(' '));
+  assert.equal(bar(staff, 4), [x(4, '3/6:16'), x(4, '6/4:16'), x(4, '3/6:16'), x(2, '4/2:16'), x(2, '3/2:16')].join(' '));
+  const repeats = score.masterBars.map(mb => `${mb.isRepeatStart ? '|:' : ''}${mb.repeatCount ? `:|x${mb.repeatCount}` : ''}`);
+  assert.deepEqual(repeats, ['|:', ':|x2', '|:', ':|x2']);
+});
+
 test('converted tabs survive the Guitar Pro export the library stores', async () => {
   const { score } = await convert('warming-up.pdf');
   const bytes = new alphaTab.exporter.Gp7Exporter().export(score, new alphaTab.Settings());

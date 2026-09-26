@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GuitarHub · Practice</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <a class="logo" href="/">Guitar<span>Hub</span></a>
+  <nav><a href="/">Library</a><a href="/practice.html" class="on">Practice</a></nav>
+</header>
+<main style="max-width: 1500px">
+  <h1>Practice</h1>
+  <p class="muted" style="margin-top: 0">Play a drill at its current tempo. Clean runs move it up 5 bpm; reach the target and the next level unlocks.</p>
+  <div class="layout" style="grid-template-columns: 380px minmax(0, 1fr)">
+    <aside class="side">
+      <section class="panel">
+        <h2>Calendar <span id="streak" class="muted" style="font-weight: 400"></span></h2>
+        <div class="row" style="flex-wrap: nowrap">
+          <button id="cal-prev" class="icon" aria-label="Previous month">‹</button>
+          <strong id="cal-month" style="flex: 1; text-align: center; font-weight: 500"></strong>
+          <button id="cal-next" class="icon" aria-label="Next month">›</button>
+        </div>
+        <div id="cal" class="cal"></div>
+        <div id="cal-day" class="muted"></div>
+      </section>
+      <section class="panel">
+        <h2>Drills</h2>
+        <div id="drills"></div>
+      </section>
+      <section class="panel">
+        <h2>AI Tutor <span class="help" tabindex="0">?<span class="tip" role="tooltip">Builds exercises from the passages you log on your tabs.</span></span></h2>
+        <textarea id="request" placeholder="Optional: what do you want to work on? e.g. 'downpicking stamina for Priest gallops'"></textarea>
+        <button id="generate" class="primary" style="margin-top: 8px">Generate 3 exercises</button>
+        <p id="gen-msg" class="muted"></p>
+        <div id="list" class="muted" style="margin-top: 12px"></div>
+      </section>
+    </aside>
+    <div>
+      <div id="current" class="panel" hidden>
+        <h3 id="cur-title" style="margin: 0"></h3>
+        <p id="cur-goal" class="muted" style="margin: 4px 0 10px"></p>
+        <div class="row">
+          <span>Now at <span class="stat" id="cur-bpm"></span> bpm</span>
+          <span class="muted">target <span id="cur-target"></span></span>
+          <button id="clean" class="primary">Clean · +5 bpm</button>
+          <button id="sloppy">Sloppy · stay</button>
+          <button id="delete">Delete</button>
+        </div>
+        <p id="run-msg" class="muted" role="status" style="margin-bottom: 0"></p>
+      </div>
+      <div class="player">
+        <div class="at-controls"></div>
+        <div class="at-score"></div>
+      </div>
+    </div>
+  </div>
+</main>
+<script type="module">
+import { createPlayer } from '/player.js';
+import { DRILLS } from '/drills.js';
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+const api = createPlayer(document.querySelector('.player'));
+let exercises = [], cur = null;
+
+api.scoreLoaded.on(() => { if (cur) api.setBpm(cur.current_bpm); });
+
+function card(e, title, sub) {
+  const pct = Math.min(100, Math.max(0, ((e.current_bpm - e.start_bpm) / Math.max(1, e.target_bpm - e.start_bpm)) * 100));
+  return `<div class="card ${cur?.id === e.id ? 'on' : ''}" data-id="${e.id}" tabindex="0" role="button">
+    <h3>${esc(title)}</h3>
+    <div class="muted">${esc(sub)} · ${e.current_bpm}/${e.target_bpm} bpm${e.current_bpm >= e.target_bpm ? ' · done ✓' : ''}</div>
+    <div class="ladder"><div style="width:${pct}%"></div></div>
+  </div>`;
+}
+
+async function load() {
+  exercises = await (await fetch('/api/exercises')).json();
+  // one card per built-in drill: its highest unlocked level
+  const drills = DRILLS.map(d => [d, exercises.filter(e => e.drill === d.key).sort((a, b) => b.level - a.level)[0]]).filter(([, e]) => e);
+  $('drills').innerHTML = drills.map(([d, e]) => card(e, d.name, `Level ${e.level + 1}/${d.levels.length}: ${d.levels[e.level].title}`)).join('');
+  $('list').innerHTML = exercises.filter(e => !e.drill).map(e => card(e, e.title, e.technique)).join('')
+    || 'None yet. Log a practice session on a tab, then generate exercises.';
+  if (cur) cur = exercises.find(e => e.id === cur.id) ?? null;
+  if (!cur && drills.length) select(drills[0][1].id);
+  showCurrent();
+  loadCalendar();
+}
+
+function showCurrent() {
+  $('current').hidden = !cur;
+  if (!cur) return;
+  $('cur-title').textContent = cur.title;
+  $('cur-goal').textContent = cur.goal;
+  $('cur-bpm').textContent = cur.current_bpm;
+  $('cur-target').textContent = cur.target_bpm;
+  api.setBpm(cur.current_bpm);
+}
+
+function select(id) {
+  cur = exercises.find(e => e.id === id);
+  document.querySelectorAll('.card').forEach(c => c.classList.toggle('on', +c.dataset.id === id));
+  $('run-msg').textContent = '';
+  api.tex(cur.alphatex);
+  showCurrent();
+}
+const side = document.querySelector('.side');
+side.addEventListener('click', e => { const c = e.target.closest('.card'); if (c) select(+c.dataset.id); });
+side.addEventListener('keydown', e => { const c = e.target.closest('.card'); if (c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(+c.dataset.id); } });
+
+async function run(clean) {
+  const r = await (await fetch(`/api/exercises/${cur.id}/runs`, { method: 'POST', body: JSON.stringify({ clean }) })).json();
+  await load();
+  if (r.unlocked) { select(r.unlocked); $('run-msg').textContent = 'Level up! Next variation unlocked.'; }
+  else $('run-msg').textContent = clean ? 'Logged. Up 5 bpm.' : 'Logged. Stay at this tempo until it is clean.';
+}
+$('clean').onclick = () => run(true);
+$('sloppy').onclick = () => run(false);
+$('delete').onclick = async () => {
+  if (!confirm(`Delete "${cur.title}"?`)) return;
+  await fetch(`/api/exercises/${cur.id}`, { method: 'DELETE' });
+  cur = null;
+  load();
+};
+
+$('generate').onclick = async () => {
+  $('generate').disabled = true;
+  $('gen-msg').textContent = 'The tutor is writing exercises… (this can take a minute)';
+  try {
+    const r = await fetch('/api/tutor', { method: 'POST', body: JSON.stringify({ request: $('request').value }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error);
+    $('gen-msg').textContent = `Added ${data.created} exercise${data.created === 1 ? '' : 's'}.`;
+    await load();
+  } catch (e) {
+    $('gen-msg').innerHTML = `<span class="error">${esc(e.message)}</span>`;
+  } finally {
+    $('generate').disabled = false;
+  }
+};
+
+// ---------- calendar ----------
+
+let sessions = [], day = null;
+const month = new Date(); month.setDate(1);
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const today = ymd(new Date());
+
+async function loadCalendar() {
+  sessions = await (await fetch('/api/sessions')).json();
+  day ??= today;
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const days = new Set(sessions.map(s => s.day));
+  const y = month.getFullYear(), m = month.getMonth();
+  const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'narrow' });
+  $('cal-month').textContent = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(month);
+  $('cal').innerHTML = Array.from({ length: 7 }, (_, i) => `<span class="muted">${weekday.format(new Date(2024, 0, 1 + i))}</span>`).join('') // 2024-01-01 was a Monday
+    + '<span></span>'.repeat((new Date(y, m, 1).getDay() + 6) % 7)
+    + Array.from({ length: new Date(y, m + 1, 0).getDate() }, (_, i) => {
+      const d = ymd(new Date(y, m, i + 1));
+      return `<button data-day="${d}" class="${days.has(d) ? 'did' : ''} ${d === today ? 'today' : ''}" aria-pressed="${d === day}">${i + 1}</button>`;
+    }).join('');
+
+  // streak: consecutive practice days ending today, or yesterday if today isn't done yet
+  let streak = 0;
+  const d = new Date();
+  if (!days.has(ymd(d))) d.setDate(d.getDate() - 1);
+  while (days.has(ymd(d))) { streak++; d.setDate(d.getDate() - 1); }
+  $('streak').textContent = streak ? `· ${streak} day streak` : '';
+
+  // one line per thing practised that day, not per run
+  const groups = Object.groupBy(sessions.filter(s => s.day === day), s => s.what ?? 'Deleted exercise');
+  $('cal-day').innerHTML = Object.entries(groups).map(([what, runs]) => {
+    const clean = runs.filter(s => s.notes === 'clean').length, best = Math.max(...runs.map(s => s.bpm ?? 0));
+    return `<div style="padding: 6px 0; border-bottom: 1px solid var(--line)">
+      <div style="color: var(--text)">${esc(what)}</div>
+      <div>${runs.length} run${runs.length === 1 ? '' : 's'}${best ? ` · up to ${best} bpm` : ''}${runs[0].exercise_id ? ` · ${clean} clean` : ''}</div>
+    </div>`;
+  }).join('') || 'Nothing logged this day.';
+}
+$('cal').onclick = e => { const b = e.target.closest('button'); if (b) { day = b.dataset.day; renderCalendar(); } };
+$('cal-prev').onclick = () => { month.setMonth(month.getMonth() - 1); renderCalendar(); };
+$('cal-next').onclick = () => { month.setMonth(month.getMonth() + 1); renderCalendar(); };
+
+load();
+</script>
+</body>
+</html>

@@ -97,3 +97,10 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
 dialog label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
 dialog ul { padding-left: 20px; margin: 8px 0 12px; }
 #pdf-preview { max-height: 60vh; overflow: auto; border-radius: 8px; }
+
+/* practice calendar */
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin: 8px 0; text-align: center; font-size: 13px; }
+.cal button { padding: 4px 0; border-color: transparent; font-weight: 400; color: var(--muted); }
+.cal button.did { color: var(--bg); background: var(--accent); }
+.cal button.today { border-color: var(--text); }
+.cal button[aria-pressed=true] { outline: 2px solid var(--accent); outline-offset: 1px; }

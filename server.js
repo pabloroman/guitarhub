@@ -5,6 +5,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import * as alphaTab from '@coderline/alphatab';
+import { DRILLS } from './public/drills.js';
 
 const PORT = process.env.PORT || 3000;
 const TABS_DIR = 'data/tabs';
@@ -22,6 +23,18 @@ db.exec(`
     start_bpm INTEGER, target_bpm INTEGER, current_bpm INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
   PRAGMA foreign_keys = ON;
 `);
+// no migrations: add newer columns, ignoring "duplicate column" once they exist
+for (const sql of ['ALTER TABLE exercises ADD COLUMN drill TEXT', 'ALTER TABLE exercises ADD COLUMN level INTEGER',
+  'ALTER TABLE sessions ADD COLUMN exercise_id INTEGER']) try { db.exec(sql); } catch {}
+
+// built-in drills are exercises rows too; a drill's next level is inserted once the previous one reaches its target
+const addLevel = (d, level) => {
+  const l = d.levels[level];
+  return Number(db.prepare(`INSERT INTO exercises (title, goal, technique, alphatex, start_bpm, target_bpm, current_bpm, drill, level)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(`${d.name} ${level + 1}: ${l.title}`, l.goal, d.name, l.alphatex,
+    l.start_bpm, l.target_bpm, l.start_bpm, d.key, level).lastInsertRowid);
+};
+for (const d of DRILLS) if (!db.prepare('SELECT 1 FROM exercises WHERE drill = ?').get(d.key)) addLevel(d, 0);
 
 const STATIC = { '/vendor/': 'node_modules/@coderline/alphatab/dist/', '/pdfjs/': 'node_modules/pdfjs-dist/legacy/build/',
   '/files/': TABS_DIR + '/', '/': 'public/' };
@@ -79,11 +92,22 @@ const routes = {
       .run(s.tab_id ?? null, s.bars ?? '', s.bpm || null, s.target_bpm || null, s.rating || null, s.notes ?? '', s.excerpt ?? '');
     json(res, { ok: true }, 201);
   },
+  // ponytail: returns every session, add a date range if this grows past a few thousand
+  'GET /api/sessions': (req, res) => json(res, db.prepare(`SELECT s.*, date(s.at, 'localtime') AS day, COALESCE(t.title, e.title) AS what
+    FROM sessions s LEFT JOIN tabs t ON t.id = s.tab_id LEFT JOIN exercises e ON e.id = s.exercise_id ORDER BY s.at`).all()),
   'GET /api/exercises': (req, res) => json(res, db.prepare('SELECT * FROM exercises ORDER BY created_at DESC, id DESC').all()),
-  'PATCH /api/exercises/:id': async (req, res, q, id) => {
-    const { current_bpm } = JSON.parse(await body(req));
-    db.prepare('UPDATE exercises SET current_bpm = ? WHERE id = ?').run(Number(current_bpm), id);
-    json(res, { ok: true });
+  // one play-through of an exercise: logged for the calendar; clean runs go up 5 bpm and can unlock the drill's next level
+  'POST /api/exercises/:id/runs': async (req, res, q, id) => {
+    const { clean } = JSON.parse(await body(req));
+    const e = db.prepare('SELECT * FROM exercises WHERE id = ?').get(id);
+    if (!e) return json(res, { error: 'not found' }, 404);
+    db.prepare('INSERT INTO sessions (exercise_id, bpm, target_bpm, notes) VALUES (?, ?, ?, ?)')
+      .run(id, e.current_bpm, e.target_bpm, clean ? 'clean' : 'sloppy');
+    if (!clean) return json(res, {});
+    const bpm = e.current_bpm + 5, d = DRILLS.find(d => d.key === e.drill), next = e.level + 1;
+    db.prepare('UPDATE exercises SET current_bpm = ? WHERE id = ?').run(bpm, id);
+    const unlock = bpm >= e.target_bpm && d?.levels[next] && !db.prepare('SELECT 1 FROM exercises WHERE drill = ? AND level = ?').get(d.key, next);
+    json(res, unlock ? { unlocked: addLevel(d, next) } : {});
   },
   'DELETE /api/exercises/:id': (req, res, q, id) => {
     db.prepare('DELETE FROM exercises WHERE id = ?').run(id);
@@ -162,7 +186,7 @@ const texError = tex => {
 
 async function tutor(request) {
   const sessions = db.prepare(`SELECT s.*, t.title, t.artist, t.tuning FROM sessions s LEFT JOIN tabs t ON t.id = s.tab_id
-    ORDER BY s.at DESC LIMIT 10`).all();
+    WHERE s.exercise_id IS NULL ORDER BY s.at DESC LIMIT 10`).all();
   const existing = db.prepare('SELECT title, technique, start_bpm, current_bpm, target_bpm FROM exercises ORDER BY id DESC LIMIT 20').all();
   const prompt = `Recent practice sessions (newest first):
 ${sessions.map(s => `- ${s.artist ?? ''} - ${s.title ?? 'free practice'} (tuning ${s.tuning ?? '?'}), bars ${s.bars}: clean at ${s.bpm ?? '?'} bpm, target ${s.target_bpm ?? '?'}, accuracy ${s.rating ?? '?'}/5. Notes: ${s.notes}${s.excerpt ? `\n  Excerpt:\n  ${s.excerpt}` : ''}`).join('\n') || '(none logged yet)'}

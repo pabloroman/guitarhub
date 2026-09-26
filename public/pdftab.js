@@ -81,7 +81,27 @@ export async function extractPage(pdfjs, page) {
       }
     }
   }
-  return { width: page.view[2] - page.view[0], height: page.view[3] - page.view[1], paths, texts };
+  return { width: page.view[2] - page.view[0], height: page.view[3] - page.view[1], paths, texts: joinGlyphs(texts) };
+}
+
+// Some exporters (Guitar Pro's Qt-based PDF writer) draw every character on its own: "10" arrives as "1" + "0".
+// Characters drawn one after another on the same baseline are joined back: touching ones directly, letters
+// a word gap apart with a space. Digits a gap apart stay separate, so "7—7" on a tab line doesn't become "77".
+function joinGlyphs(texts) {
+  const out = [];
+  for (const t of texts) {
+    const prev = out.at(-1);
+    const music = s => /[\ue000-\uf8ff]/.test(s); // music-font glyphs (noteheads, dots…) always stand alone
+    const same = prev && !t.rotated && !prev.rotated && !music(prev.str) && !music(t.str) && prev.font === t.font &&
+      Math.abs(prev.size - t.size) < 0.1 &&
+      Math.abs(prev.y - t.y) < t.size * 0.05;
+    const gap = same ? t.x - (prev.x + prev.w) : Infinity;
+    if (gap > -t.size * 0.1 && gap < t.size * 0.08) Object.assign(prev, { str: prev.str + t.str, w: t.x + t.w - prev.x });
+    else if (gap > 0 && gap < t.size * 0.45 && !(/\d$/.test(prev.str) && /^\d/.test(t.str)))
+      Object.assign(prev, { str: `${prev.str} ${t.str}`, w: t.x + t.w - prev.x });
+    else out.push({ ...t });
+  }
+  return out;
 }
 
 // ---------- page layout: staves, tabs, bars ----------
@@ -135,7 +155,8 @@ function barLines(pg, sys) {
   const spans = p => Math.abs(p.y0 - tab.top) < 1 && Math.abs(p.y1 - tab.bottom) < 1;
   const lines = pg.paths.filter(p => spans(p) && p.x1 - p.x0 < sp * 0.7 &&
     ((p.paint === 'fill' && /^ml{3}h?$/.test(p.segs)) || (p.paint === 'stroke' && p.segs === 'ml')));
-  const dots = pg.paths.filter(p => isCircle(p) && p.x1 - p.x0 < sp * 0.6 && p.y0 > tab.top && p.y1 < tab.bottom);
+  const dots = pg.paths.filter(p => isCircle(p) && p.x1 - p.x0 < sp * 0.6 && p.y0 > tab.top && p.y1 < tab.bottom)
+    .concat(smuflDots(pg, sp, SMUFL.repeatDot).filter(d => d.y0 > tab.top && d.y1 < tab.bottom));
   return cluster(lines, p => p.x0, sp * 1.2).map(g => {
     const x0 = Math.min(...g.map(p => p.x0)), x1 = Math.max(...g.map(p => p.x1));
     return { x0, x1, x: (x0 + x1) / 2,
@@ -161,6 +182,16 @@ function tabBeats(pg, sys, x0, x1) {
   return cluster(notes, n => n.cx, sys.sp * 0.5).map(g => ({ x: avg(g.map(n => n.cx)), notes: g.sort((a, b) => a.string - b.string) }));
 }
 
+// Guitar Pro's Qt-based exporter draws noteheads, dots, flags, rests and tuplet numbers as characters of a
+// SMuFL music font (Bravura) instead of as shapes. Code points are from the SMuFL standard.
+const glyph = t => (t.str.length === 1 && t.str.charCodeAt(0) >= 0xe000 ? t.str.charCodeAt(0) : 0);
+const SMUFL = { noteWhole: 0xe0a2, noteHalf: 0xe0a3, noteBlack: 0xe0a4, dot: 0xe1e7, repeatDot: 0xe044 };
+const smuflFlags = c => (c >= 0xe240 && c <= 0xe24f ? Math.floor((c - 0xe240) / 2) + 1 : 0); // 8th up/down, 16th up/down, …
+const smuflRest = c => (c >= 0xe4e3 && c <= 0xe4e9 ? 2 ** (c - 0xe4e3) : 0); // whole, half, quarter … 64th
+const smuflTuplet = c => (c >= 0xe882 && c <= 0xe889 ? c - 0xe880 : 0);
+const smuflDots = (pg, sp, code) => pg.texts.filter(t => glyph(t) === code)
+  .map(t => ({ x0: t.x, x1: t.x + t.w, y0: t.y - t.w / 2, y1: t.y + t.w / 2 }));
+
 // The glyphs of one system's staff that carry rhythm.
 function staffGlyphs(pg, sys) {
   const { staff, tab, sp } = sys;
@@ -169,18 +200,33 @@ function staffGlyphs(pg, sys) {
   const heads = pg.paths.filter(p => inY(p) && p.paint === 'fill' && /^(mc+h)+$/.test(p.segs) &&
     Math.abs(p.y1 - p.y0 - sp) < sp * 0.25 && p.x1 - p.x0 > sp * 1.05 && p.x1 - p.x0 < sp * 2)
     .map(p => ({ ...p, cx: (p.x0 + p.x1) / 2, cy: (p.y0 + p.y1) / 2, hollow: p.segs.split('h').length > 2 }));
+  const inYt = t => t.y >= top && t.y <= bottom;
+  // SMuFL noteheads sit centred on their baseline
+  for (const t of pg.texts.filter(inYt)) {
+    const c = glyph(t);
+    if (c >= SMUFL.noteWhole && c <= SMUFL.noteBlack)
+      heads.push({ x0: t.x, x1: t.x + t.w, cx: t.x + t.w / 2, cy: t.y, hollow: c !== SMUFL.noteBlack });
+  }
   const stems = pg.paths.filter(p => inY(p) && p.paint === 'stroke' && p.segs === 'ml' && p.x1 - p.x0 < 0.2 &&
     p.y1 - p.y0 > sp * 1.5 && p.lw > 0.4 && p.lw < 1.5);
-  const beams = pg.paths.filter(p => inY(p) && p.paint === 'fill' && /^ml{3}h?$/.test(p.segs) && p.x1 - p.x0 > sp * 0.8)
+  const beams = pg.paths.filter(p => inY(p) && p.paint === 'fill' && /^ml{3,4}h?$/.test(p.segs) && p.x1 - p.x0 > sp * 0.8)
     .map(p => {
-      const byX = [...p.pts].sort((a, b) => a[0] - b[0]);
-      const yl = (byX[0][1] + byX[1][1]) / 2, yr = (byX[2][1] + byX[3][1]) / 2;
+      const yl = avg(p.pts.filter(q => q[0] - p.x0 < 0.5).map(q => q[1]));
+      const yr = avg(p.pts.filter(q => p.x1 - q[0] < 0.5).map(q => q[1]));
       return { ...p, yAt: x => yl + ((yr - yl) * (x - p.x0)) / (p.x1 - p.x0 || 1) };
     });
   const flags = pg.paths.filter(p => inY(p) && p.paint === 'fill' && p.segs.includes('c') && !heads.includes(p) &&
     p.x1 - p.x0 > sp * 0.5 && p.x1 - p.x0 < sp * 1.8 && p.y1 - p.y0 > sp * 1.2 && p.y1 - p.y0 < sp * 4);
-  const dots = pg.paths.filter(p => inY(p) && isCircle(p) && p.x1 - p.x0 < sp * 0.6 && p.x1 - p.x0 > sp * 0.25);
-  return { heads, stems, beams, flags, dots };
+  // a SMuFL flag starts at the stem end: its baseline is the stem tip
+  for (const t of pg.texts.filter(inYt)) {
+    const count = smuflFlags(glyph(t));
+    if (count) flags.push({ x0: t.x, y0: t.y - sp, y1: t.y + sp, count });
+  }
+  const dots = pg.paths.filter(p => inY(p) && isCircle(p) && p.x1 - p.x0 < sp * 0.6 && p.x1 - p.x0 > sp * 0.25)
+    .concat(smuflDots(pg, sp, SMUFL.dot).filter(d => d.y0 >= top && d.y1 <= bottom));
+  const rests = pg.texts.filter(t => inYt(t) && smuflRest(glyph(t)))
+    .map(t => ({ x: t.x + t.w / 2, x1: t.x + t.w, y: t.y, duration: smuflRest(glyph(t)) }));
+  return { heads, stems, beams, flags, dots, rests };
 }
 
 // Duration of the beat at tab position x, read from the standard notation above it.
@@ -201,7 +247,8 @@ function rhythmAt(g, sp, x) {
     // flags hang off the stem end that has no notehead
     const up = avg(heads.map(h => h.cy)) > (stem.y0 + stem.y1) / 2;
     const tipY = up ? stem.y0 : stem.y1;
-    const flags = beams ? 0 : g.flags.filter(f => Math.abs(f.x0 - sx) < sp * 0.3 && f.y0 < tipY + sp * 1.5 && f.y1 > tipY - sp * 1.5).length;
+    const flags = beams ? 0 : g.flags.filter(f => Math.abs(f.x0 - sx) < sp * 0.3 && f.y0 < tipY + sp * 1.5 && f.y1 > tipY - sp * 1.5)
+      .reduce((n, f) => n + (f.count ?? 1), 0);
     duration = 4 * 2 ** (beams + flags);
   }
   const right = Math.max(...heads.map(h => h.x1));
@@ -216,16 +263,17 @@ function tuplets(pg, sys, g) {
   const brackets = pg.paths.filter(p => p.paint === 'stroke' && /^mll?$/.test(p.segs) && p.lw > 0.5 &&
     p.x1 - p.x0 > sp * 1.5 && p.y1 - p.y0 < sp);
   // Guitar Pro sets tuplet numbers in italics, which keeps bar numbers out
-  return pg.texts.filter(t => /^[2-9]$/.test(t.str) && !t.rotated && (!t.font || /italic|oblique/i.test(t.font)) &&
-    t.y > staff.top - sp * 9 && t.y < sys.tab.top - sp * 0.5)
+  return pg.texts.filter(t => !t.rotated && t.y > staff.top - sp * 9 && t.y < sys.tab.top - sp * 0.5 &&
+    (smuflTuplet(glyph(t)) || (/^[2-9]$/.test(t.str) && (!t.font || /italic|oblique/i.test(t.font)))))
     .map(t => {
+      const n = smuflTuplet(glyph(t)) || Number(t.str);
       const cy = t.y - t.size * 0.35, tx0 = t.x, tx1 = t.x + t.w;
       const near = brackets.filter(b => Math.abs((b.y0 + b.y1) / 2 - cy) < sp * 0.8);
       const left = near.find(b => b.x1 <= tx0 + 0.5 && tx0 - b.x1 < sp * 1.5);
       const right = near.find(b => b.x0 >= tx1 - 0.5 && b.x0 - tx1 < sp * 1.5);
-      if (left && right) return { n: Number(t.str), x0: left.x0, x1: right.x1 };
+      if (left && right) return { n, x0: left.x0, x1: right.x1 };
       const beam = g.beams.find(b => b.x0 < tx0 && b.x1 > tx1 && Math.abs(b.yAt(t.x) - cy) < sp * 2.5);
-      return beam && { n: Number(t.str), x0: beam.x0 - sp, x1: beam.x1 + sp };
+      return beam && { n, x0: beam.x0 - sp, x1: beam.x1 + sp };
     }).filter(Boolean);
 }
 
@@ -299,9 +347,13 @@ export async function pdfToTex(pdfjs, data, { name = '' } = {}) {
       // text above the staff: "3x" repeat counts and "= 120" tempo marks
       const above = pg.texts.filter(t => t.y < staff.top && t.y > staff.top - sp * 9);
       let start = tab.x0, opens = false;
-      for (const line of lines) {
+      for (const [li, line] of lines.entries()) {
         const beats = tabBeats(pg, sys, start, line.x0);
-        if (!beats.length && line.x0 - start < sp * 6) { opens ||= line.opens; start = line.x1; continue; } // clef area or double line
+        const rests = g.rests.filter(r => r.x > start && r.x < line.x0);
+        // clef/time signature area before a repeat sign, or a double bar line
+        if (!beats.length && !rests.length && (line.x0 - start < sp * 6 || (li === 0 && line.opens))) {
+          opens ||= line.opens; start = line.x1; continue;
+        }
         const bar = { number: bars.length + 1, page: p, beats: [], opens, closes: line.closes ? 2 : 0, tempo: null };
         if (line.closes) {
           const count = above.find(t => /^\d+x$/i.test(t.str) && Math.abs(t.x + t.w / 2 - line.x) < sp * 4);
@@ -310,12 +362,17 @@ export async function pdfToTex(pdfjs, data, { name = '' } = {}) {
         const mark = above.find(t => /^=\s*\d+$/.test(t.str) && t.x > start - sp * 2 && t.x < line.x0);
         if (mark) bar.tempo = Number(mark.str.replace(/\D/g, ''));
         let unknown = 0;
+        const tupletAt = x => tups.find(t => x >= t.x0 - sp * 0.5 && x <= t.x1 + sp * 0.5)?.n ?? 0;
         for (const b of beats) {
           const r = rhythmAt(g, sp, b.x);
           if (!r) unknown++;
-          const tup = tups.find(t => b.x >= t.x0 - sp * 0.5 && b.x <= t.x1 + sp * 0.5);
-          bar.beats.push({ notes: b.notes, duration: r?.duration ?? 4, dotted: r?.dotted ?? false, tuplet: tup?.n ?? 0 });
+          bar.beats.push({ x: b.x, notes: b.notes, duration: r?.duration ?? 4, dotted: r?.dotted ?? false, tuplet: tupletAt(b.x) });
         }
+        for (const r of rests) {
+          const dotted = g.dots.some(d => d.x0 > r.x1 && d.x0 - r.x1 < sp * 1.2);
+          bar.beats.push({ x: r.x, notes: [], duration: r.duration, dotted, tuplet: tupletAt(r.x) });
+        }
+        bar.beats.sort((a, b) => a.x - b.x);
         if (unknown) warnings.push(`bar ${bar.number}: rhythm of ${unknown} beat${unknown > 1 ? 's' : ''} not found, guessed quarter notes`);
         bars.push(bar);
         start = line.x1;
@@ -335,7 +392,7 @@ export async function pdfToTex(pdfjs, data, { name = '' } = {}) {
   const { tuning, unknown } = readTuning(tuningLines, strings);
   if (unknown) warnings.push(tuningLines.length ? `tuning "${tuningLines.join(' ')}" not recognised, assuming standard tuning` : 'no tuning shown, assuming standard tuning');
   // title and artist: the two biggest lines of text (chord diagrams and bar numbers are small)
-  const titled = header.filter(t => !tuningLines.includes(t.str) && !/^[=\d\s/]+$/.test(t.str) && t.size >= 14)
+  const titled = header.filter(t => !tuningLines.includes(t.str) && !/^[=\d\s/]+$/.test(t.str) && !glyph(t) && t.size >= 10)
     .sort((a, b) => b.size - a.size);
   const title = titled[0]?.str || name.replace(/\.pdf$/i, '');
   const artist = titled[1] && titled[1].size < titled[0].size ? titled[1].str : '';
@@ -370,7 +427,8 @@ export async function pdfToTex(pdfjs, data, { name = '' } = {}) {
         return tie ? `-.${n.string}` : `${n.fret}.${n.string}${n.paren ? '{g}' : ''}`;
       });
       const fx = [beat.dotted && 'd', beat.tuplet && `tu ${beat.tuplet}`].filter(Boolean).join(' ');
-      out.push(`${notes.length > 1 ? `(${notes.join(' ')})` : notes[0]}.${beat.duration}${fx ? `{${fx}}` : ''}`);
+      const head = !notes.length ? 'r' : notes.length > 1 ? `(${notes.join(' ')})` : notes[0];
+      out.push(`${head}.${beat.duration}${fx ? `{${fx}}` : ''}`);
     }
     return out.join(' ');
   });

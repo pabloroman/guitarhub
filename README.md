@@ -74,4 +74,6 @@ The weights are at the top of `optimizer.js`. They're tuned against the test cas
 
 The result is written as alphaTex, loaded by alphaTab and saved as a `.gp` file, so everything else in the app works on it the same way as on an uploaded Guitar Pro file.
 
-Not read yet: rests, ties, techniques (bends, slides, hammer-ons, palm mutes…), and PDFs with more than one track.
+Guitar Pro writes PDFs in two ways and both are read: as shapes (macOS "Save as PDF"), or with noteheads, dots, flags and rests as characters of a music font (the Windows/Qt export). Rests are only read in the second kind so far.
+
+Not read yet: ties, techniques (bends, slides, hammer-ons, palm mutes…), and PDFs with more than one track.

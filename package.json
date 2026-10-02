@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test",
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "rm -rf dist && cp -r public dist && cp -r node_modules/@coderline/alphatab/dist dist/vendor && cp -r node_modules/pdfjs-dist/legacy/build dist/pdfjs && cp -r node_modules/@supabase/supabase-js/dist/umd dist/supabase"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +14,7 @@
   "type": "module",
   "dependencies": {
     "@coderline/alphatab": "^1.8.4",
+    "@supabase/supabase-js": "^2.117.2",
     "pdfjs-dist": "^6.3.289"
   }
 }

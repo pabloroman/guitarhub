@@ -51,7 +51,9 @@
     </div>
   </div>
 </main>
+<script src="/supabase/supabase.js"></script>
 <script type="module">
+import { db } from '/db.js';
 import { createPlayer } from '/player.js';
 import { DRILLS } from '/drills.js';
 
@@ -71,8 +73,24 @@ function card(e, title, sub) {
   </div>`;
 }
 
+// drills are exercises rows; a drill's next level is inserted once the previous one reaches its target
+const levelRow = (d, level) => {
+  const l = d.levels[level];
+  return { title: `${d.name} ${level + 1}: ${l.title}`, goal: l.goal, technique: d.name, alphatex: l.alphatex,
+    start_bpm: l.start_bpm, target_bpm: l.target_bpm, current_bpm: l.start_bpm, drill: d.key, level };
+};
+const fetchExercises = () => db.from('exercises').select().order('created_at', { ascending: false }).order('id', { ascending: false });
+
 async function load() {
-  exercises = await (await fetch('/api/exercises')).json();
+  let { data, error } = await fetchExercises();
+  // first visit, or a drill was deleted: start every missing drill at its first level
+  const missing = error ? [] : DRILLS.filter(d => !data.some(e => e.drill === d.key));
+  if (missing.length) {
+    ({ error } = await db.from('exercises').upsert(missing.map(d => levelRow(d, 0)), { onConflict: 'user_id,drill,level', ignoreDuplicates: true }));
+    if (!error) ({ data, error } = await fetchExercises());
+  }
+  if (error) { $('drills').innerHTML = `<p class="error">Could not load your drills: ${esc(error.message)}</p>`; return; }
+  exercises = data;
   // one card per built-in drill: its highest unlocked level
   const drills = DRILLS.map(d => [d, exercises.filter(e => e.drill === d.key).sort((a, b) => b.level - a.level)[0]]).filter(([, e]) => e);
   $('drills').innerHTML = drills.map(([d, e]) => card(e, d.name, `Level ${e.level + 1}/${d.levels.length}: ${d.levels[e.level].title}`)).join('');
@@ -103,17 +121,31 @@ const side = document.querySelector('.side');
 side.addEventListener('click', e => { const c = e.target.closest('.card'); if (c) select(+c.dataset.id); });
 side.addEventListener('keydown', e => { const c = e.target.closest('.card'); if (c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(+c.dataset.id); } });
 
+// one play-through: logged for the calendar; clean runs go up 5 bpm and can unlock the drill's next level
 async function run(clean) {
-  const r = await (await fetch(`/api/exercises/${cur.id}/runs`, { method: 'POST', body: JSON.stringify({ clean }) })).json();
+  $('clean').disabled = $('sloppy').disabled = true; // a double click would log twice from the same tempo
+  let unlocked;
+  let { error } = await db.from('sessions').insert({ exercise_id: cur.id, bpm: cur.current_bpm, target_bpm: cur.target_bpm, notes: clean ? 'clean' : 'sloppy' });
+  if (clean && !error) {
+    const bpm = cur.current_bpm + 5, d = DRILLS.find(d => d.key === cur.drill), next = cur.level + 1;
+    ({ error } = await db.from('exercises').update({ current_bpm: bpm }).eq('id', cur.id));
+    if (!error && bpm >= cur.target_bpm && d?.levels[next] && !exercises.some(e => e.drill === d.key && e.level === next)) {
+      const r = await db.from('exercises').insert(levelRow(d, next)).select('id').single();
+      error = r.error; unlocked = r.data?.id;
+    }
+  }
   await load();
-  if (r.unlocked) { select(r.unlocked); $('run-msg').textContent = 'Level up! Next variation unlocked.'; }
+  $('clean').disabled = $('sloppy').disabled = false;
+  if (error) $('run-msg').innerHTML = `<span class="error">Could not save: ${esc(error.message)}</span>`;
+  else if (unlocked) { select(unlocked); $('run-msg').textContent = 'Level up! Next variation unlocked.'; }
   else $('run-msg').textContent = clean ? 'Logged. Up 5 bpm.' : 'Logged. Stay at this tempo until it is clean.';
 }
 $('clean').onclick = () => run(true);
 $('sloppy').onclick = () => run(false);
 $('delete').onclick = async () => {
   if (!confirm(`Delete "${cur.title}"?`)) return;
-  await fetch(`/api/exercises/${cur.id}`, { method: 'DELETE' });
+  const { error } = await db.from('exercises').delete().eq('id', cur.id);
+  if (error) { $('run-msg').innerHTML = `<span class="error">Could not delete: ${esc(error.message)}</span>`; return; }
   cur = null;
   load();
 };
@@ -126,7 +158,12 @@ const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')
 const today = ymd(new Date());
 
 async function loadCalendar() {
-  sessions = await (await fetch('/api/sessions')).json();
+  // ponytail: Supabase returns at most 1000 rows, so this is the newest 1000 runs; beyond that older months go blank
+  // and the streak tops out. Fetch only the visible month, and count the streak in SQL, when that starts to show.
+  const { data, error } = await db.from('sessions').select('at, bpm, notes, exercise_id, tabs(title), exercises(title)')
+    .order('at', { ascending: false });
+  if (error) { $('cal-day').innerHTML = `<span class="error">Could not load the calendar: ${esc(error.message)}</span>`; return; }
+  sessions = data.map(s => ({ ...s, day: ymd(new Date(s.at)), what: s.tabs?.title ?? s.exercises?.title }));
   day ??= today;
   renderCalendar();
 }

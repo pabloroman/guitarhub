@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GuitarHub · Sign in</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <a class="logo" href="/">Guitar<span>Hub</span></a>
+</header>
+<main style="max-width: 420px; text-align: center">
+  <h1>Sign in</h1>
+  <p class="muted">Your tabs, fingering edits and practice log are kept in your own private library.</p>
+  <button id="google" class="primary">Continue with Google</button>
+  <p id="msg" class="error" role="alert"></p>
+</main>
+<script src="/supabase/supabase.js"></script>
+<script type="module">
+import { db } from '/db.js';
+
+document.getElementById('google').onclick = async () => {
+  const { error } = await db.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + '/' } });
+  if (error) document.getElementById('msg').textContent = error.message;
+};
+</script>
+</body>
+</html>

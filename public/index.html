@@ -42,19 +42,27 @@
     </div>
   </form>
 </dialog>
+<script src="/supabase/supabase.js"></script>
 <script type="module">
+import { db, user } from '/db.js';
 import { alphaTab, tuningLabel, guitarTracks } from '/player.js';
 import { pdfToTex } from '/pdftab.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+const err = (what, error) => `<span class="error">${esc(what)}: ${esc(error.message)}</span>`;
 const splitTags = s => (s ?? '').split(',').map(t => t.trim()).filter(Boolean);
 const TRASH = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>';
 
 async function load() {
-  const tabs = await (await fetch('/api/tabs?q=' + encodeURIComponent($('q').value))).json();
+  // ponytail: Supabase returns at most 1000 rows, so a bigger library loses its alphabetical tail. Page it then.
+  const { data, error } = await db.from('tabs').select().order('artist').order('title');
+  if (error) { $('list').innerHTML = `<tr><td colspan="6">${err('Could not load your library', error)}</td></tr>`; return; }
+  // filtered here, not in the query: no user input to escape into a PostgREST filter
+  const q = $('q').value.trim().toLowerCase();
+  const tabs = data.filter(t => [t.title, t.artist, t.tags].some(s => (s ?? '').toLowerCase().includes(q)));
   $('list').innerHTML = tabs.map(t => `
-    <tr data-id="${t.id}">
+    <tr data-id="${t.id}" data-file="${esc(t.file)}">
       <td><a href="/tab.html?id=${t.id}">${esc(t.title)}</a></td>
       <td>${esc(t.artist)}</td>
       <td class="muted">${esc(t.tuning)}</td>
@@ -65,7 +73,8 @@ async function load() {
 }
 
 async function saveTags(td, tags) {
-  await fetch(`/api/tabs/${td.closest('tr').dataset.id}`, { method: 'PATCH', body: JSON.stringify({ tags: [...new Set(tags)].join(', ') }) });
+  const { error } = await db.from('tabs').update({ tags: [...new Set(tags)].join(', ') }).eq('id', td.closest('tr').dataset.id);
+  if (error) $('msg').innerHTML = err('Could not save tags', error);
   load();
 }
 $('list').addEventListener('click', async e => {
@@ -86,7 +95,10 @@ $('list').addEventListener('click', async e => {
   if (btn.matches('.del')) {
     const tr = btn.closest('tr');
     if (!confirm(`Delete "${tr.querySelector('a').textContent}"? This removes the file and its fingering edits.`)) return;
-    await fetch(`/api/tabs/${tr.dataset.id}`, { method: 'DELETE' });
+    // file first: if the row went first and the file removal failed, nothing would point at the file any more
+    let { error } = await db.storage.from('tabs').remove([tr.dataset.file]);
+    if (!error) ({ error } = await db.from('tabs').delete().eq('id', tr.dataset.id));
+    if (error) $('msg').innerHTML = err('Could not delete', error);
     load();
   }
 });
@@ -131,7 +143,7 @@ $('files').onchange = async e => {
       $('msg').textContent = `Reading ${file.name}…`;
       let r;
       try { r = await fromPdf(file); }
-      catch (err) { done.push(`<span class="error">${esc(file.name)}: ${esc(err.message)}</span>`); continue; }
+      catch (e) { done.push(err(file.name, e)); continue; }
       if (!r) { done.push(`Skipped ${esc(file.name)}`); continue; }
       ({ score, bytes, name } = r);
     } else {
@@ -140,15 +152,15 @@ $('files').onchange = async e => {
       catch { done.push(`<span class="error">${esc(file.name)}: not a readable Guitar Pro file</span>`); continue; }
     }
     const guitar = guitarTracks(score)[0];
-    const meta = new URLSearchParams({
-      name,
-      title: score.title || name.replace(/\.\w+$/, ''),
-      artist: score.artist || '',
-      tuning: guitar ? tuningLabel(guitar.staves[0]) : '',
-      tempo: score.tempo,
-    });
-    const res = await fetch('/api/tabs?' + meta, { method: 'POST', body: bytes });
-    done.push(res.ok ? `Added ${esc(meta.get('title'))}` : `<span class="error">${esc(file.name)}: upload failed</span>`);
+    const title = score.title || name.replace(/\.\w+$/, '');
+    const path = `${user.id}/${crypto.randomUUID()}${name.match(/\.\w+$/)?.[0].toLowerCase() ?? ''}`;
+    let { error } = await db.storage.from('tabs').upload(path, bytes, { contentType: 'application/octet-stream' });
+    if (!error) {
+      ({ error } = await db.from('tabs').insert({ file: path, title, artist: score.artist || '',
+        tuning: guitar ? tuningLabel(guitar.staves[0]) : '', tempo: score.tempo || null }));
+      if (error) await db.storage.from('tabs').remove([path]); // don't keep a file no row points at
+    }
+    done.push(error ? err(file.name, error) : `Added ${esc(title)}`);
   }
   $('msg').innerHTML = done.join(' · ');
   e.target.value = '';

@@ -107,22 +107,26 @@
     </aside>
   </div>
 </main>
+<script src="/supabase/supabase.js"></script>
 <script type="module">
+import { db } from '/db.js';
 import { alphaTab, createPlayer, tuningLabel, guitarTracks, barTempos } from '/player.js';
 import { optimize, STYLES } from '/optimizer.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 const id = new URLSearchParams(location.search).get('id');
-const res = await fetch(`/api/tabs/${id}`);
-if (!res.ok) { $('title').textContent = 'Tab not found'; throw new Error('not found'); }
-const tab = await res.json();
+// someone else's tab comes back empty too: the database only returns the signed-in user's rows
+const { data: tab } = await db.from('tabs').select('*, fingerings(track, changes), sessions(*)').eq('id', id)
+  .order('at', { referencedTable: 'sessions', ascending: false }).maybeSingle();
+if (!tab) { $('title').textContent = 'Tab not found'; throw new Error('not found'); }
 $('title').textContent = tab.title;
 $('meta').textContent = [tab.artist, tab.tuning, tab.tempo && `${tab.tempo} bpm`, tab.tags].filter(Boolean).join(' · ');
 document.title = `GuitarHub · ${tab.title}`;
 
 const api = createPlayer(document.querySelector('.player'));
-const saved = tab.fingerings; // { trackIndex: [change] }, `from` is always the file's original fingering
+// { trackIndex: [change] }, `from` is always the file's original fingering
+const saved = Object.fromEntries(tab.fingerings.map(f => [f.track, f.changes]));
 let trackIndex = 0, pending = null, ready = false;
 
 const staff = () => api.score.tracks[trackIndex].staves[0];
@@ -164,7 +168,9 @@ api.scoreLoaded.on(score => {
   if (trackIndex !== 0) api.renderTracks([score.tracks[trackIndex]]);
   fingStatus();
 });
-api.load(await (await fetch('/files/' + tab.file)).arrayBuffer());
+const file = await db.storage.from('tabs').download(tab.file);
+if (file.error) { $('meta').innerHTML = `<span class="error">Could not load the tab file: ${esc(file.error.message)}</span>`; throw file.error; }
+api.load(await file.data.arrayBuffer());
 
 $('track').onchange = e => { if (pending) discard(); trackIndex = +e.target.value; rerender(); fingStatus(); };
 
@@ -229,18 +235,25 @@ function discard() {
 }
 $('discard').onclick = discard;
 
+// Saves before anything on screen changes: on failure it says so and returns false, leaving things as they were for a retry.
+async function saveFingering(changes) {
+  const { error } = await db.from('fingerings').upsert({ tab_id: +id, track: trackIndex, changes });
+  if (error) $('fing-status').textContent = `Could not save: ${error.message}`;
+  return !error;
+}
+
 async function accept(filter) {
   const st = staff(), accepted = pending.filter(filter);
-  apply(st, pending, 'from');           // start from the pre-suggestion state…
-  apply(st, accepted, 'to');            // …then keep only what was accepted
-  highlight(st, pending, false);
   const merged = new Map((saved[trackIndex] ?? []).map(c => [key(c), c]));
   for (const c of accepted) {
     const from = merged.get(key(c))?.from ?? c.from;
     if (same(from, c.to)) merged.delete(key(c)); else merged.set(key(c), { ...c, from });
   }
+  if (!await saveFingering([...merged.values()])) return;
+  apply(st, pending, 'from');           // start from the pre-suggestion state…
+  apply(st, accepted, 'to');            // …then keep only what was accepted
+  highlight(st, pending, false);
   saved[trackIndex] = [...merged.values()];
-  await fetch(`/api/tabs/${id}/fingerings`, { method: 'PUT', body: JSON.stringify({ track: trackIndex, changes: saved[trackIndex] }) });
   pending = null;
   $('fing-idle').hidden = false; $('fing-review').hidden = true;
   fingStatus();
@@ -252,9 +265,9 @@ $('accept-range').onclick = () => {
   accept(c => c.bar + 1 >= a && c.bar + 1 <= b);
 };
 $('reset').onclick = async () => {
+  if (!await saveFingering([])) return;
   apply(staff(), saved[trackIndex], 'from');
   saved[trackIndex] = [];
-  await fetch(`/api/tabs/${id}/fingerings`, { method: 'PUT', body: JSON.stringify({ track: trackIndex, changes: [] }) });
   fingStatus();
   rerender();
 };
@@ -316,7 +329,7 @@ function renderSessions(list) {
   $('sessions').innerHTML = list.map(s => `
     <div style="padding: 6px 0; border-bottom: 1px solid var(--line)">
       <div style="color: var(--text)">${s.bars ? `Bars ${esc(s.bars)}` : 'Whole song'} · ${s.bpm ?? '?'}/${s.target_bpm ?? '?'} bpm · ${s.rating ?? '?'}/5</div>
-      <div>${esc(s.at.slice(0, 16))}${s.notes ? ` · ${esc(s.notes)}` : ''}</div>
+      <div>${new Date(s.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}${s.notes ? ` · ${esc(s.notes)}` : ''}</div>
     </div>`).join('') || 'No sessions yet.';
 }
 renderSessions(tab.sessions);
@@ -324,13 +337,14 @@ renderSessions(tab.sessions);
 $('log').onsubmit = async e => {
   e.preventDefault();
   const from = +$('bar-from').value || null, to = +$('bar-to').value || from;
-  const s = { tab_id: +id, bars: from ? `${from}-${to}` : '', bpm: +$('bpm').value, target_bpm: +$('target').value,
+  const s = { tab_id: +id, bars: from ? `${from}-${to}` : '', bpm: +$('bpm').value || null, target_bpm: +$('target').value || null,
     rating: +$('rating').value, notes: $('notes').value };
-  const r = await fetch('/api/sessions', { method: 'POST', body: JSON.stringify(s) });
-  $('log-msg').textContent = r.ok ? 'Saved.' : 'Could not save.';
-  if (r.ok) {
+  const { data: row, error } = await db.from('sessions').insert(s).select().single();
+  $('log-msg').textContent = error ? `Could not save: ${error.message}` : 'Saved.';
+  if (!error) {
     $('notes').value = '';
-    renderSessions((await (await fetch(`/api/tabs/${id}`)).json()).sessions);
+    tab.sessions.unshift(row);
+    renderSessions(tab.sessions);
   }
 };
 </script>

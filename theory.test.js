@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as alphaTab from '@coderline/alphatab';
-import { SCALES, OPEN, PROGRESSIONS, scale, chords, positions, scaleTex, chordsTex } from './public/theory.js';
+import { SCALES, CHORD_TYPES, OPEN, PROGRESSIONS, scale, chord, chords, shape, voicings, positions, scaleTex, chordsTex } from './public/theory.js';
 
 const names = (root, s) => scale(root, s).map(n => n.name).join(' ');
 const numerals = (root, s) => chords(root, s).map(c => c.numeral).join(' ');
@@ -70,6 +70,35 @@ for (const s in SCALES) test(`${s} positions and progressions make playable tab`
       const bars = fullBars(chordsTex(OPEN, degrees.map(i => list[i])));
       assert.equal(bars.length, degrees.length);
       assert.deepEqual(bars[0].voices[0].beats[0].notes.map(n => n.realValue % 12).sort(), [...list[degrees[0]].frets.flatMap((f, i) => f < 0 ? [] : (OPEN[i] + f) % 12)].sort());
+    }
+  }
+});
+
+const sounded = frets => frets.flatMap((f, i) => f < 0 ? [] : (OPEN[i] + f) % 12);
+const text = frets => frets.map(f => f < 0 ? 'x' : f).join('');
+
+test('the chord finder finds the textbook open chords', () => {
+  const found = (root, type) => voicings(OPEN, root, type).map(text);
+  assert.ok(found(0, 'Major').includes('x32010'), found(0, 'Major').join(' '));
+  assert.ok(found(7, 'Major').includes('320003'), found(7, 'Major').join(' '));
+  assert.ok(found(9, 'Minor').includes('x02210'), found(9, 'Minor').join(' '));
+  assert.ok(found(2, 'Dominant 7th').includes('xx0212'), found(2, 'Dominant 7th').join(' '));
+  assert.ok(found(4, 'Dominant 7th').includes('020100'), found(4, 'Dominant 7th').join(' '));
+  assert.ok(found(0, 'Major 7th').includes('x32000'), found(0, 'Major 7th').join(' '));
+  assert.equal(chord(0, 'Diminished 7th').map(n => n.name).join(' '), 'C Eb Gb Bbb');
+  assert.equal(chord(10, 'Dominant 9th').map(n => n.name).join(' '), 'Bb D F Ab C');
+});
+
+for (const type in CHORD_TYPES) test(`${type} voicings are playable on every root`, () => {
+  for (let root = 0; root < 12; root++) {
+    const tones = chord(root, type).map(n => n.pc), all = voicings(OPEN, root, type);
+    assert.ok(all.length >= 3, `${chord(root, type)[0].name}: only ${all.map(text)}`);
+    for (const frets of all) {
+      const pcs = sounded(frets), fretted = frets.filter(f => f > 0);
+      assert.equal(pcs[0], root, `${text(frets)} has its root in the bass`);
+      assert.ok(pcs.every(pc => tones.includes(pc)), `${text(frets)} only has chord notes`);
+      assert.ok(tones.every((pc, i) => pcs.includes(pc) || (i === 2 && tones.length > 3)), `${text(frets)} has every note but maybe the 5th`);
+      assert.ok(Math.max(...fretted) - Math.min(...fretted) <= 3, `${text(frets)} fits one hand`);
     }
   }
 });

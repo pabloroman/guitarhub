@@ -8,6 +8,17 @@ export const SCALES = {
   Dorian: '1 2 b3 4 5 6 b7', Phrygian: '1 b2 b3 4 5 b6 b7', Lydian: '1 2 3 #4 5 6 7', Mixolydian: '1 2 3 4 5 6 b7', Locrian: '1 b2 b3 4 b5 b6 b7',
 };
 
+// Chord types the same way, plus the symbol written after the root (Cmaj7).
+export const CHORD_TYPES = {
+  Major: { symbol: '', degrees: '1 3 5' }, Minor: { symbol: 'm', degrees: '1 b3 5' },
+  Diminished: { symbol: 'dim', degrees: '1 b3 b5' }, Augmented: { symbol: 'aug', degrees: '1 3 #5' },
+  'Suspended 2nd': { symbol: 'sus2', degrees: '1 2 5' }, 'Suspended 4th': { symbol: 'sus4', degrees: '1 4 5' },
+  'Major 6th': { symbol: '6', degrees: '1 3 5 6' }, 'Minor 6th': { symbol: 'm6', degrees: '1 b3 5 6' },
+  'Dominant 7th': { symbol: '7', degrees: '1 3 5 b7' }, 'Major 7th': { symbol: 'maj7', degrees: '1 3 5 7' }, 'Minor 7th': { symbol: 'm7', degrees: '1 b3 5 b7' },
+  'Half-diminished': { symbol: 'm7b5', degrees: '1 b3 b5 b7' }, 'Diminished 7th': { symbol: 'dim7', degrees: '1 b3 b5 bb7' },
+  'Added 9th': { symbol: 'add9', degrees: '1 3 5 9' }, 'Dominant 9th': { symbol: '9', degrees: '1 3 5 b7 9' },
+};
+
 const LETTERS = 'CDEFGAB', NATURAL = [0, 2, 4, 5, 7, 9, 11]; // the naturals' pitch classes, which are also the major scale's steps
 const SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'], FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 
@@ -15,7 +26,8 @@ const SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
 function spell(rootName, root, degrees) {
   let accidentals = 0;
   const notes = degrees.map(degree => {
-    const n = degree.at(-1) - 1, pc = (root + NATURAL[n] + ({ '#': 1, b: -1 }[degree[0]] ?? 0) + 12) % 12;
+    const n = (parseInt(degree.replace(/[#b]/g, '')) - 1) % 7, sharps = degree.split('#').length - degree.split('b').length; // 9 is 2 an octave up
+    const pc = (root + NATURAL[n] + sharps + 12) % 12;
     const letter = (LETTERS.indexOf(rootName[0]) + n) % 7, alter = ((pc - NATURAL[letter] + 18) % 12) - 6;
     accidentals += Math.abs(alter);
     return { pc, degree, name: LETTERS[letter] + ['bb', 'b', '', '#', 'x'][alter + 2] };
@@ -24,13 +36,14 @@ function spell(rootName, root, degrees) {
 }
 
 // [{ pc, degree, name }], root first, under whichever of the root's two names needs fewer accidentals (Eb major, not D#)
-export function scale(root, name) {
-  const degrees = SCALES[name].split(' ');
-  // five- and six-note scales take their root's name from the major or minor key they sit in (Bb blues, like Bb minor)
+function named(root, degrees) {
+  // chords and five- and six-note scales take their root's name from the major or minor key they sit in (Bb blues, like Bb minor)
   const key = degrees.length === 7 ? degrees : SCALES[degrees.includes('b3') ? 'Minor' : 'Major'].split(' ');
   const rootName = [SHARP[root], FLAT[root]].sort((a, b) => spell(a, root, key).accidentals - spell(b, root, key).accidentals)[0];
   return spell(rootName, root, degrees).notes;
 }
+export const scale = (root, name) => named(root, SCALES[name].split(' '));
+export const chord = (root, type) => named(root, CHORD_TYPES[type].degrees.split(' '));
 
 // A scale's hand positions, each [{ string, fret }] in rising pitch (string 0 is the lowest), starting with the one
 // whose lowest note is the root. A position walks up the scale from one of its notes on the lowest string, a fixed
@@ -72,6 +85,38 @@ export function shape(root, quality) {
   return frets.map(f => f === X ? X : n + f);
 }
 
+// Ways to play a chord as [{ frets, low, cost }], one per place on the neck: `frets` is one fret per string (-1 for
+// muted), `low` the lowest fretted fret, `cost` how awkward it is (lower is easier).
+// ponytail: "playable" here is a rule of thumb (root in the bass, one four-fret hand span, four fingers with a barre,
+// open strings only near the nut). It finds the textbook shapes but can't judge an awkward stretch, and it skips
+// voicings with a muted string in the middle. If it suggests bad ones, curate fingerings per chord instead.
+function search(open, root, type) {
+  const tones = chord(root, type).map(n => n.pc);
+  const needed = tones.length > 3 ? tones.filter((_, i) => i !== 2) : tones; // the 5th is the note bigger chords can do without
+  const best = new Map(); // lowest fretted fret -> the easiest, fullest voicing there
+  const consider = frets => {
+    const first = frets.findIndex(f => f !== X), last = frets.findLastIndex(f => f !== X), sounding = frets.slice(first, last + 1);
+    if (sounding.length < 4 || sounding.includes(X)) return; // four strings or more, next to each other
+    const pcs = sounding.map((f, i) => (open[first + i] + f) % 12);
+    if (pcs[0] !== root || !needed.every(pc => pcs.includes(pc))) return;
+    const fretted = frets.filter(f => f > 0), low = fretted.length ? Math.min(...fretted) : 0;
+    // a finger per fretted note, except that a barre takes all the notes at the lowest fret when no open string rings between them
+    const atLow = fretted.filter(f => f === low).length, barre = atLow > 1 && !frets.slice(frets.indexOf(low), frets.lastIndexOf(low)).includes(0);
+    const fingers = fretted.length - (barre ? atLow - 1 : 0), stretch = fretted.length ? Math.max(...fretted) - low : 0;
+    // fewer fingers and less stretch beat more strings; between equals, the one without open strings (a movable shape)
+    const cost = fingers * 2 + stretch * 2 - sounding.length * 3 + frets.filter(f => f === 0).length * .1;
+    if (fingers <= 4 && low < 12 && !(best.get(low)?.cost <= cost)) best.set(low, { frets, low, cost }); // from the 12th fret the shapes repeat
+  };
+  for (let base = 1; base < 12; base++) {
+    const options = open.map(o => [X, ...(base === 1 ? [0] : []), base, base + 1, base + 2, base + 3].filter(f => f === X || tones.includes((o + f) % 12)));
+    const walk = frets => frets.length < open.length ? options[frets.length].forEach(f => walk([...frets, f])) : consider(frets);
+    walk([]);
+  }
+  return [...best.values()];
+}
+// the six easiest, from the nut upwards
+export const voicings = (open, root, type) => search(open, root, type).sort((a, b) => a.cost - b.cost).slice(0, 6).sort((a, b) => a.low - b.low).map(v => v.frets);
+
 const QUALITY = { '4,7': 'Major', '3,7': 'Minor', '3,6': 'Diminished', '4,8': 'Augmented' };
 const NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
 
@@ -83,7 +128,7 @@ export function chords(root, name) {
     const notes = [r, s[(i + 2) % 7], s[(i + 4) % 7]].map(n => n.pc);
     const quality = QUALITY[notes.slice(1).map(n => (n - r.pc + 12) % 12)];
     const numeral = quality === 'Major' || quality === 'Augmented' ? NUMERALS[i] : NUMERALS[i].toLowerCase();
-    return { root: r.pc, name: r.name, quality, notes, frets: shape(r.pc, quality),
+    return { root: r.pc, name: r.name, quality, notes, frets: shape(r.pc, quality), symbol: r.name + CHORD_TYPES[quality].symbol,
       numeral: r.degree.slice(0, -1) + numeral + ({ Diminished: '°', Augmented: '+' }[quality] ?? '') };
   });
 }
@@ -101,11 +146,10 @@ export function scaleTex(open, position) {
   return `\\tempo 90\n${tabTex(open, `:8 ${run.map((n, i) => (i + 1) % 8 ? n : `${n} |`).join(' ')}`)}`;
 }
 
-const SYMBOL = { Major: '', Minor: 'm', Diminished: 'dim', Augmented: 'aug' };
-// one bar per chord, strummed 1, 2 or 4 times, with the chord's name above it
+// one bar per chord ({ frets, symbol }), strummed 1, 2 or 4 times, with the chord's symbol above it
 export const chordsTex = (open, chords, strums = 4) => `\\tempo 90\n${tabTex(open, chords.map(c => {
   const beat = `(${c.frets.flatMap((f, s) => f < 0 ? [] : `${f}.${open.length - s}`).join(' ')})`;
-  return `:${strums} ${beat}{ch "${c.name}${SYMBOL[c.quality]}"} ${`${beat} `.repeat(strums - 1)}|`;
+  return `:${strums} ${beat}{ch "${c.symbol}"} ${`${beat} `.repeat(strums - 1)}|`;
 }).join(' '))}`;
 
 // chord progressions as degrees of the key (0 is the tonic), for keys with a major and with a minor tonic chord

@@ -9,7 +9,7 @@ A small web app for practicing guitar from Guitar Pro tabs:
 - **Fingering optimizer**: suggests easier fingerings, for example keeping a phrase in one hand position instead of jumping around the neck. You review the suggestions bar by bar and accept the ones you like. Accepted changes are stored separately, so your original file is never modified.
 - **Practice**: built-in technique drills, each with a tempo ladder: mark a run "clean" and the tempo goes up 5 bpm, reach the target and the next level unlocks. A calendar shows the days you practiced and your streak.
 - **Practice log**: on any tab, log what you practiced (bars, clean tempo, what felt hard).
-- **Resources**: pick a root and a scale (major, minor, pentatonics, blues, harmonic minor or a mode), from the dropdowns or on a circle of fifths, to see the scale across the fretboard, as note names or degrees, and the key's chords as chord boxes with their Roman numerals. Step through the scale's hand positions one at a time and play each as tab, pick a chord to hear it and see where its notes sit on the neck, or loop a common progression in the key to play along with. Any of these can be added to your Practice drills, with the same tempo ladder as the built-in ones.
+- **Resources**: pick a root and a scale (major, minor, pentatonics, blues, harmonic minor or a mode), from the dropdowns or on a circle of fifths, to see the scale across the fretboard, as note names or degrees, and the key's chords as chord boxes with their Roman numerals. Step through the scale's hand positions one at a time and play each as tab, pick a chord to hear it and see where its notes sit on the neck, or loop a common progression in the key to play along with. Any of these can be added to your Practice drills, with the same tempo ladder as the built-in ones. A **chord finder** shows up to six ways to play any chord (triads, sus, 6ths, 7ths, 9ths) from the nut up the neck.
 
 Sign in with Google and you get your own private library. Tabs, fingering edits and the practice log are stored in [Supabase](https://supabase.com), so they follow you to any browser.
 
@@ -43,7 +43,7 @@ Supabase's free tier may pause a project after about a week with little activity
 npm test
 ```
 
-The tests cover the fingering optimizer, the PDF import, the drills and the chord shapes on the Resources page. The optimizer tests include a few real passages where a player's preferred fingering is used as the expected answer. The PDF tests convert the Guitar Pro exports in `test/fixtures/`.
+The tests cover the fingering optimizer, the PDF import, the drills and the music theory behind the Resources page: note spelling, chord shapes and voicings, scale positions and the tab generated from them. The optimizer tests include a few real passages where a player's preferred fingering is used as the expected answer. The PDF tests convert the Guitar Pro exports in `test/fixtures/`.
 
 ## How the fingering optimizer works
 

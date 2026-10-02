@@ -12,9 +12,23 @@
   <nav><a href="/">Library</a><a href="/practice.html">Practice</a><a href="/resources.html" class="on">Resources</a></nav>
 </header>
 <main>
+  <h1>Resources</h1>
+  <div class="row" style="margin: 12px 0 16px">
+    <button class="toggle" data-tab="keys">Keys and scales</button>
+    <button class="toggle" data-tab="finder">Chord finder</button>
+  </div>
+  <section id="finder" hidden>
+    <p class="muted" style="margin-top: 0">Pick a chord to see ways to play it, from the nut up the neck. Click one to hear it.</p>
+    <div class="row" style="margin-bottom: 16px">
+      <label class="muted">Root <select id="chord-root"></select></label>
+      <label class="muted">Chord <select id="chord-type"></select></label>
+    </div>
+    <h2 id="finder-title"></h2>
+    <div id="voicings" class="chords"></div>
+  </section>
+  <section id="keys">
   <div class="row" style="align-items: start; margin-bottom: 16px">
     <div style="flex: 1; min-width: 260px">
-      <h1>Resources</h1>
       <p class="muted" style="margin-top: 0">Pick a key to see where the scale sits on the neck and which chords belong to it.</p>
       <div class="row" style="margin-top: 16px">
         <label class="muted">Root <select id="root"></select></label>
@@ -47,12 +61,13 @@
     <div class="at-controls"></div>
     <div class="at-score"></div>
   </div>
+  </section>
 </main>
 <script src="/supabase/supabase.js"></script>
 <script type="module">
 import { db } from '/db.js';
 import { alphaTab, createPlayer } from '/player.js';
-import { SCALES, OPEN, PROGRESSIONS, scale, chords, positions, scaleTex, chordsTex } from '/theory.js';
+import { SCALES, CHORD_TYPES, OPEN, PROGRESSIONS, scale, chord, chords, voicings, positions, scaleTex, chordsTex } from '/theory.js';
 
 const $ = id => document.getElementById(id);
 const isMinor = notes => notes.some(n => n.degree === 'b3'); // which ring of the circle of fifths a scale belongs to
@@ -61,10 +76,12 @@ const api = createPlayer(document.querySelector('.player'));
 const FRETS = 17;
 // a chord's notes counted from its own root, for the Degrees labels while a chord is picked
 const TONE = { 0: '1', 3: 'b3', 4: '3', 6: 'b5', 7: '5', 8: '#5' };
-// the key lives in the URL so other pages can link to one
+// what is showing lives in the URL so other pages can link to it; both sections share the root
 const params = new URLSearchParams(location.search);
+let tab = params.get('tab') === 'finder' ? 'finder' : 'keys';
 let root = Math.abs(parseInt(params.get('root')) || 0) % 12;
 let name = Object.hasOwn(SCALES, params.get('scale')) ? params.get('scale') : 'Major';
+let type = Object.hasOwn(CHORD_TYPES, params.get('type')) ? params.get('type') : 'Major';
 let label = 'name', pos = null, picked = null; // pos and picked index the scale's positions and chords; null is "all"
 let prog = null; // index of the progression in the player; null is the scale
 
@@ -79,6 +96,8 @@ function load(tex) {
 }
 const play = () => { if (loading) autoplay = true; else api.play(); };
 api.playerReady.on(() => { loading = false; $('play').disabled = false; if (autoplay) { autoplay = false; api.play(); } });
+// a one-chord tab ({ frets, symbol }) that is never shown, only played; not while something else is playing
+const strum = chord => { if (api.playerState !== 1) api.playBeat(alphaTab.importer.ScoreLoader.loadAlphaTex(chordsTex(OPEN, [chord], 1)).tracks[0].staves[0].bars[0].voices[0].beats[0]); };
 const playLabel = () => { $('play').textContent = api.playerState === 1 && prog === null ? 'Pause' : 'Play scale'; };
 api.playerStateChanged.on(playLabel);
 
@@ -133,33 +152,44 @@ function circle(minor) {
 function render() {
   const notes = scale(root, name), key = `${notes[0].name} ${name}`, list = chords(root, name), boxes = positions(OPEN, notes, FRETS);
   if (pos >= boxes.length) pos = null;
-  const box = boxes[pos], chord = list[picked]; // undefined when showing everything
+  const box = boxes[pos], pickedChord = list[picked]; // undefined when showing everything
   // progressions for keys whose tonic chord is major, or minor; none for scales without chords
   const sets = list.length ? PROGRESSIONS[list[0].quality === 'Major' ? 'Major' : 'Minor'] : [];
   const progName = p => p.name ?? p.degrees.map(i => list[i].numeral).join(' – ');
-  history.replaceState(null, '', `?${new URLSearchParams({ root, scale: name })}`);
+  history.replaceState(null, '', `?${new URLSearchParams(tab === 'finder' ? { tab, root, type } : { root, scale: name })}`);
+  for (const b of document.querySelectorAll('[data-tab]')) b.setAttribute('aria-pressed', b.dataset.tab === tab);
+  $('keys').hidden = tab !== 'keys';
+  $('finder').hidden = tab !== 'finder';
+
+  const tones = chord(root, type), symbol = tones[0].name + CHORD_TYPES[type].symbol, text = frets => frets.map(f => f < 0 ? 'x' : f).join(' ');
+  $('chord-root').innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i}" ${i === root ? 'selected' : ''}>${chord(i, type)[0].name}</option>`).join('');
+  $('finder-title').textContent = `${symbol} · ${tones.map(n => n.name).join(' ')}`;
+  $('voicings').innerHTML = voicings(OPEN, root, type).map(frets => `<button class="card" data-frets="${frets}" data-symbol="${symbol}" aria-label="${symbol}: ${text(frets)}">
+      ${chordBox(frets)}<span class="muted">${text(frets)}</span>
+    </button>`).join('');
+
   // a root is written differently from scale to scale: Db major, C# minor
   $('root').innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i}" ${i === root ? 'selected' : ''}>${scale(i, name)[0].name}</option>`).join('');
 
   $('circle').innerHTML = circle(isMinor(notes));
 
-  $('neck-title').textContent = chord ? `${chord.name} ${chord.quality} in ${key}` : key;
+  $('neck-title').textContent = pickedChord ? `${pickedChord.name} ${pickedChord.quality} in ${key}` : key;
   $('pos').textContent = box ? `Position ${pos + 1} of ${boxes.length}` : 'All positions';
   $('all').setAttribute('aria-pressed', !box);
   $('degrees').setAttribute('aria-pressed', label === 'degree');
-  $('neck').innerHTML = fretboard(`${$('neck-title').textContent} on the fretboard: ${(chord ? notes.filter(n => chord.notes.includes(n.pc)) : notes).map(n => n.name).join(' ')}`, (string, fret) => {
+  $('neck').innerHTML = fretboard(`${$('neck-title').textContent} on the fretboard: ${(pickedChord ? notes.filter(n => pickedChord.notes.includes(n.pc)) : notes).map(n => n.name).join(' ')}`, (string, fret) => {
     const n = notes.find(n => n.pc === (OPEN[string] + fret) % 12);
     if (!n) return;
-    const tone = chord && TONE[(n.pc - chord.root + 12) % 12];
-    return { root: n.pc === (chord ? chord.root : root), text: label === 'name' ? n.name : chord ? tone ?? '' : n.degree,
-      dim: (chord && !chord.notes.includes(n.pc)) || (box && !box.some(b => b.string === string && b.fret === fret)) };
+    const tone = pickedChord && TONE[(n.pc - pickedChord.root + 12) % 12];
+    return { root: n.pc === (pickedChord ? pickedChord.root : root), text: label === 'name' ? n.name : pickedChord ? tone ?? '' : n.degree,
+      dim: (pickedChord && !pickedChord.notes.includes(n.pc)) || (box && !box.some(b => b.string === string && b.fret === fret)) };
   });
   // on a narrow screen the neck scrolls sideways: bring the position into view
   if (box) $('neck').scrollLeft = (Math.min(...box.map(b => b.fret)) * 60 - 20) / (60 + FRETS * 60) * $('neck').scrollWidth;
-  $('legend').innerHTML =`<span><span style="color: var(--accent)">●</span> ${chord ? 'Chord root' : 'Root note'}</span><span><span style="color: var(--ok)">●</span> ${chord ? 'Chord note' : 'Scale note'}</span>`;
+  $('legend').innerHTML =`<span><span style="color: var(--accent)">●</span> ${pickedChord ? 'Chord root' : 'Root note'}</span><span><span style="color: var(--ok)">●</span> ${pickedChord ? 'Chord note' : 'Scale note'}</span>`;
 
   $('chords-title').textContent = `Chords in ${key}`;
-  $('chords').innerHTML = list.length ? `<div class="chords">${list.map((c, i) => `<button class="card" data-chord="${i}" aria-pressed="${i === picked}" aria-label="${c.numeral}, ${c.name} ${c.quality}: ${c.frets.map(f => f < 0 ? 'x' : f).join(' ')}">
+  $('chords').innerHTML = list.length ? `<div class="chords">${list.map((c, i) => `<button class="card" data-chord="${i}" aria-pressed="${i === picked}" aria-label="${c.numeral}, ${c.name} ${c.quality}: ${text(c.frets)}">
       <span class="muted">${c.numeral}</span>
       <b>${c.name} <span class="muted">${c.quality}</span></b>${chordBox(c.frets)}
     </button>`).join('')}</div>
@@ -173,7 +203,11 @@ function render() {
 }
 
 $('scale').innerHTML = Object.keys(SCALES).map(s => `<option ${s === name ? 'selected' : ''}>${s}</option>`).join('');
-$('root').onchange = e => { root = +e.target.value; picked = null; render(); };
+$('chord-type').innerHTML = Object.keys(CHORD_TYPES).map(t => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('');
+for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => { tab = b.dataset.tab; render(); };
+$('chord-type').onchange = e => { type = e.target.value; render(); };
+$('voicings').onclick = e => { const v = e.target.closest('[data-frets]'); if (v) strum({ frets: v.dataset.frets.split(',').map(Number), symbol: v.dataset.symbol }); };
+$('root').onchange = $('chord-root').onchange = e => { root = +e.target.value; picked = null; render(); };
 $('scale').onchange = e => { name = e.target.value; picked = prog = null; render(); };
 $('play').onclick = () => {
   if (api.playerState === 1 && prog === null) return api.pause();
@@ -211,9 +245,7 @@ $('chords').onclick = e => {
   const c = e.target.closest('[data-chord]'), p = e.target.closest('[data-prog]');
   if (c) {
     picked = picked === +c.dataset.chord ? null : +c.dataset.chord;
-    // strum it, unless that would interrupt what is playing: a one-chord tab that is never shown, only played
-    const chord = chords(root, name)[picked];
-    if (chord && api.playerState !== 1) api.playBeat(alphaTab.importer.ScoreLoader.loadAlphaTex(chordsTex(OPEN, [chord], 1)).tracks[0].staves[0].bars[0].voices[0].beats[0]);
+    if (picked !== null) strum(chords(root, name)[picked]);
   }
   if (p) {
     prog = prog === +p.dataset.prog ? null : +p.dataset.prog;

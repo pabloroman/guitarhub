@@ -13,31 +13,40 @@
 </header>
 <main>
   <h1>Resources</h1>
-  <p class="muted" style="margin-top: 0">Pick a key to see its chords and where the scale sits on the neck.</p>
+  <p class="muted" style="margin-top: 0">Pick a key to see where the scale sits on the neck and which chords belong to it.</p>
   <div class="row" style="margin: 16px 0">
     <label class="muted">Root <select id="root"></select></label>
     <label class="muted">Scale <select id="scale"></select></label>
-    <span class="row" style="margin-left: auto">
-      <button id="degrees" class="toggle" aria-pressed="false">Degrees</button>
-      <button class="toggle" data-view="chords">Chords</button>
-      <button class="toggle" data-view="fretboard">Fretboard</button>
-    </span>
   </div>
-  <h2 id="title"></h2>
-  <div id="view"></div>
+  <h2 id="neck-title"></h2>
+  <div class="panel">
+    <div class="row" style="margin-bottom: 8px">
+      <button id="prev" class="icon" aria-label="Previous position">‹</button>
+      <span id="pos" role="status" style="min-width: 13ch; text-align: center"></span>
+      <button id="next" class="icon" aria-label="Next position">›</button>
+      <button id="all" class="toggle">Whole neck</button>
+      <button id="degrees" class="toggle" style="margin-left: auto">Degrees</button>
+    </div>
+    <div id="neck" class="neck"></div>
+    <p id="legend" class="row muted" style="justify-content: center; gap: 20px; margin: 8px 0 0"></p>
+  </div>
+  <h2 id="chords-title"></h2>
+  <div id="chords"></div>
 </main>
 <script src="/supabase/supabase.js"></script>
 <script type="module">
 import '/db.js'; // sign-in gate and the Sign out button
-import { SCALES, OPEN, scale, chords } from '/theory.js';
+import { SCALES, OPEN, scale, chords, positions } from '/theory.js';
 
 const $ = id => document.getElementById(id);
-const toggles = document.querySelectorAll('[data-view]');
+const FRETS = 17;
+// a chord's notes counted from its own root, for the Degrees labels while a chord is picked
+const TONE = { 0: '1', 3: 'b3', 4: '3', 6: 'b5', 7: '5', 8: '#5' };
 // the key lives in the URL so other pages can link to one
 const params = new URLSearchParams(location.search);
 let root = Math.abs(parseInt(params.get('root')) || 0) % 12;
 let name = Object.hasOwn(SCALES, params.get('scale')) ? params.get('scale') : 'Major';
-let view = 'chords', label = 'name';
+let label = 'name', pos = null, picked = null; // pos and picked index the scale's positions and chords; null is "all"
 
 // six strings across, five frets down
 function chordBox(frets) {
@@ -53,49 +62,66 @@ function chordBox(frets) {
   </svg>`;
 }
 
-// high E on top like a tab staff, open strings left of the nut; `notes` is the scale, root first
-function fretboard(notes, title) {
+// High E on top like a tab staff, open strings left of the nut.
+// dot(string, fret) says what sits there, if anything: { text, root, dim }; string 0 is the lowest.
+function fretboard(title, dot) {
   const x = f => f ? 50 + (f - .5) * 60 : 25, y = s => 20 + s * 28;
-  const frets = Array.from({ length: 14 }, (_, f) => f), strings = [0, 1, 2, 3, 4, 5];
+  const frets = Array.from({ length: FRETS + 1 }, (_, f) => f), strings = [0, 1, 2, 3, 4, 5];
   const inlay = (f, s) => `<circle cx="${x(f)}" cy="${y(s)}" r="5" fill="var(--muted)" opacity=".35"/>`;
-  return `<svg viewBox="0 0 840 195" role="img" aria-label="${title} on the fretboard: ${notes.map(n => n.name).join(' ')}">
-    ${[3, 5, 7, 9].map(f => inlay(f, 2.5)).join('')}${inlay(12, 1.5)}${inlay(12, 3.5)}
-    <path stroke="var(--muted)" opacity=".6" d="${strings.map(s => `M8 ${y(s)}H832`).join('')}"/>
+  return `<svg viewBox="0 0 ${60 + FRETS * 60} 195" role="img" aria-label="${title}">
+    ${[3, 5, 7, 9, 15, 17].map(f => inlay(f, 2.5)).join('')}${inlay(12, 1.5)}${inlay(12, 3.5)}
+    <path stroke="var(--muted)" opacity=".6" d="${strings.map(s => `M8 ${y(s)}H${52 + FRETS * 60}`).join('')}"/>
     <path stroke="var(--muted)" stroke-width="2" d="${frets.map(f => `M${50 + f * 60} ${y(0)}V${y(5)}`).join('')}"/>
     <path stroke="var(--text)" stroke-width="5" d="M50 ${y(0)}V${y(5)}"/>
     ${strings.flatMap(s => frets.map(f => {
-      const n = notes.find(n => n.pc === (OPEN[5 - s] + f) % 12);
-      return n ? `<circle cx="${x(f)}" cy="${y(s)}" r="11" fill="var(--${n === notes[0] ? 'accent' : 'ok'})"/>
-        <text x="${x(f)}" y="${y(s) + 4}" class="note">${n[label]}</text>` : '';
+      const d = dot(5 - s, f);
+      return d ? `<g opacity="${d.dim ? .22 : 1}"><circle cx="${x(f)}" cy="${y(s)}" r="11" fill="var(--${d.root ? 'accent' : 'ok'})"/>
+        <text x="${x(f)}" y="${y(s) + 4}" class="note">${d.text}</text></g>` : '';
     })).join('')}
     ${frets.map(f => `<text x="${x(f)}" y="188">${f}</text>`).join('')}
   </svg>`;
 }
 
 function render() {
-  const notes = scale(root, name), key = `${notes[0].name} ${name}`, list = chords(root, name);
+  const notes = scale(root, name), key = `${notes[0].name} ${name}`, list = chords(root, name), boxes = positions(OPEN, notes, FRETS);
+  if (pos >= boxes.length) pos = null;
+  const box = boxes[pos], chord = list[picked]; // undefined when showing everything
   history.replaceState(null, '', `?${new URLSearchParams({ root, scale: name })}`);
   // a root is written differently from scale to scale: Db major, C# minor
   $('root').innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i}" ${i === root ? 'selected' : ''}>${scale(i, name)[0].name}</option>`).join('');
-  for (const b of toggles) b.setAttribute('aria-pressed', b.dataset.view === view);
-  $('degrees').hidden = view === 'chords';
+
+  $('neck-title').textContent = chord ? `${chord.name} ${chord.quality} in ${key}` : key;
+  $('pos').textContent = box ? `Position ${pos + 1} of ${boxes.length}` : 'All positions';
+  $('all').setAttribute('aria-pressed', !box);
   $('degrees').setAttribute('aria-pressed', label === 'degree');
-  $('title').textContent = view === 'chords' ? `Chords in ${key}` : `Scale on fretboard: ${key}`;
-  $('view').innerHTML = view === 'fretboard'
-    ? `<div class="panel neck">${fretboard(notes, key)}</div>
-      <p class="row muted" style="justify-content: center; gap: 20px"><span><span style="color: var(--accent)">●</span> Root note</span><span><span style="color: var(--ok)">●</span> Scale note</span></p>`
-    : list.length ? `<div class="chords">${list.map(c => `<div class="panel" role="img" aria-label="${c.numeral}, ${c.name} ${c.quality}: ${c.frets.map(f => f < 0 ? 'x' : f).join(' ')}">
-        <div class="muted">${c.numeral}</div>
-        <h3>${c.name} <span class="muted">${c.quality}</span></h3>${chordBox(c.frets)}
-      </div>`).join('')}</div>`
+  $('neck').innerHTML = fretboard(`${$('neck-title').textContent} on the fretboard: ${(chord ? notes.filter(n => chord.notes.includes(n.pc)) : notes).map(n => n.name).join(' ')}`, (string, fret) => {
+    const n = notes.find(n => n.pc === (OPEN[string] + fret) % 12);
+    if (!n) return;
+    const tone = chord && TONE[(n.pc - chord.root + 12) % 12];
+    return { root: n.pc === (chord ? chord.root : root), text: label === 'name' ? n.name : chord ? tone ?? '' : n.degree,
+      dim: (chord && !chord.notes.includes(n.pc)) || (box && !box.some(b => b.string === string && b.fret === fret)) };
+  });
+  // on a narrow screen the neck scrolls sideways: bring the position into view
+  if (box) $('neck').scrollLeft = (Math.min(...box.map(b => b.fret)) * 60 - 20) / (60 + FRETS * 60) * $('neck').scrollWidth;
+  $('legend').innerHTML =`<span><span style="color: var(--accent)">●</span> ${chord ? 'Chord root' : 'Root note'}</span><span><span style="color: var(--ok)">●</span> ${chord ? 'Chord note' : 'Scale note'}</span>`;
+
+  $('chords-title').textContent = `Chords in ${key}`;
+  $('chords').innerHTML = list.length ? `<div class="chords">${list.map((c, i) => `<button class="card" data-chord="${i}" aria-pressed="${i === picked}" aria-label="${c.numeral}, ${c.name} ${c.quality}: ${c.frets.map(f => f < 0 ? 'x' : f).join(' ')}">
+      <span class="muted">${c.numeral}</span>
+      <b>${c.name} <span class="muted">${c.quality}</span></b>${chordBox(c.frets)}
+    </button>`).join('')}</div><p class="muted">Pick a chord to see its notes on the neck.</p>`
     : `<p class="muted">Chords are built by stacking thirds on a seven-note scale, and ${name} has ${notes.length} notes.</p>`;
 }
 
 $('scale').innerHTML = Object.keys(SCALES).map(s => `<option ${s === name ? 'selected' : ''}>${s}</option>`).join('');
-$('root').onchange = e => { root = +e.target.value; render(); };
-$('scale').onchange = e => { name = e.target.value; render(); };
+$('root').onchange = e => { root = +e.target.value; picked = null; render(); };
+$('scale').onchange = e => { name = e.target.value; picked = null; render(); };
 $('degrees').onclick = () => { label = label === 'name' ? 'degree' : 'name'; render(); };
-for (const b of toggles) b.onclick = () => { view = b.dataset.view; render(); };
+$('all').onclick = () => { pos = null; render(); };
+const step = by => () => { const n = positions(OPEN, scale(root, name), FRETS).length; pos = pos === null ? (by > 0 ? 0 : n - 1) : (pos + by + n) % n; render(); };
+$('prev').onclick = step(-1);
+$('next').onclick = step(1);
+$('chords').onclick = e => { const c = e.target.closest('[data-chord]'); if (c) { picked = picked === +c.dataset.chord ? null : +c.dataset.chord; render(); } };
 render();
 </script>
 </body>

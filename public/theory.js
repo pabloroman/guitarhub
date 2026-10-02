@@ -32,6 +32,28 @@ export function scale(root, name) {
   return spell(rootName, root, degrees).notes;
 }
 
+// A scale's hand positions, each [{ string, fret }] in rising pitch (string 0 is the lowest), starting with the one
+// whose lowest note is the root. A position walks up the scale from one of its notes on the lowest string, a fixed
+// number of notes per string: 3 for seven-note scales, 2 for pentatonics.
+export function positions(open, notes, maxFret = 17) {
+  // Blues is its pentatonic box plus the b5s inside the box
+  const blue = notes.length === 6 && notes.find(n => n.degree === 'b5');
+  const pcs = notes.filter(n => n !== blue).map(n => n.pc), per = pcs.length === 7 ? 3 : 2;
+  return pcs.map(first => {
+    const pitches = [];
+    for (let p = open[0] + (first - open[0] % 12 + 12) % 12; pitches.length < per * open.length; p++) if (pcs.includes(p % 12)) pitches.push(p);
+    let out = pitches.map((p, i) => ({ string: Math.floor(i / per), fret: p - open[Math.floor(i / per)] }));
+    // a box that would start behind the nut is played an octave up
+    if (out.some(n => n.fret < 0)) out = out.map(n => ({ ...n, fret: n.fret + 12 }));
+    if (blue) {
+      const frets = out.map(n => n.fret);
+      open.forEach((o, string) => { for (let fret = Math.min(...frets); fret <= Math.max(...frets); fret++) if ((o + fret) % 12 === blue.pc) out.push({ string, fret }); });
+      out.sort((a, b) => open[a.string] + a.fret - open[b.string] - b.fret);
+    }
+    return out;
+  }).filter(p => p.every(n => n.fret <= maxFret)); // drop one that runs off the end of the neck
+}
+
 const X = -1; // muted string
 // the open chords that aren't a barre shape slid down to the nut, keyed by root + quality
 const OPEN_SHAPES = { '0Major': [X, 3, 2, 0, 1, 0], '2Major': [X, X, 0, 2, 3, 2], '7Major': [3, 2, 0, 0, 0, 3], '2Minor': [X, X, 0, 2, 3, 1] };

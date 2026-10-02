@@ -93,7 +93,10 @@ async function load() {
   exercises = data;
   // one card per built-in drill: its highest unlocked level
   const drills = DRILLS.map(d => [d, exercises.filter(e => e.drill === d.key).sort((a, b) => b.level - a.level)[0]]).filter(([, e]) => e);
-  $('drills').innerHTML = drills.map(([d, e]) => card(e, d.name, `Level ${e.level + 1}/${d.levels.length}: ${d.levels[e.level].title}`)).join('');
+  // plus the ones added from the Resources page, which have no levels
+  const mine = exercises.filter(e => !DRILLS.some(d => d.key === e.drill));
+  $('drills').innerHTML = drills.map(([d, e]) => card(e, d.name, `Level ${e.level + 1}/${d.levels.length}: ${d.levels[e.level].title}`)).join('')
+    + (mine.length ? '<h2 style="margin-top: 16px">Your drills</h2>' : '') + mine.map(e => card(e, e.title, e.technique)).join('');
   if (cur) cur = exercises.find(e => e.id === cur.id) ?? null;
   if (!cur && drills.length) select(drills[0][1].id);
   showCurrent();

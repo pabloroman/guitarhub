@@ -33,7 +33,11 @@
   </div>
   <h2 id="chords-title"></h2>
   <div id="chords"></div>
-  <h2 id="tab-title" style="margin-top: 24px"></h2>
+  <div class="row" style="margin: 24px 0 10px">
+    <h2 id="tab-title" style="margin: 0"></h2>
+    <button id="practise">Add to my drills</button>
+    <span id="practise-msg" class="muted" role="status"></span>
+  </div>
   <div class="player">
     <div class="at-controls"></div>
     <div class="at-score"></div>
@@ -41,11 +45,12 @@
 </main>
 <script src="/supabase/supabase.js"></script>
 <script type="module">
-import '/db.js'; // sign-in gate and the Sign out button
+import { db } from '/db.js';
 import { alphaTab, createPlayer } from '/player.js';
 import { SCALES, OPEN, PROGRESSIONS, scale, chords, positions, scaleTex, chordsTex } from '/theory.js';
 
 const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 const api = createPlayer(document.querySelector('.player'));
 const FRETS = 17;
 // a chord's notes counted from its own root, for the Degrees labels while a chord is picked
@@ -62,6 +67,7 @@ let loaded = '', loading = false, autoplay = false;
 function load(tex) {
   if (tex === loaded) return;
   loaded = tex; loading = true;
+  $('practise-msg').textContent = '';
   api.stop();
   api.tex(tex);
 }
@@ -156,6 +162,17 @@ $('all').onclick = () => { pos = null; render(); };
 const step = by => () => { const n = positions(OPEN, scale(root, name), FRETS).length; pos = pos === null ? (by > 0 ? 0 : n - 1) : (pos + by + n) % n; render(); };
 $('prev').onclick = step(-1);
 $('next').onclick = step(1);
+// what the player is showing becomes a drill on the Practice page, with the same tempo ladder as the built-in ones
+$('practise').onclick = async () => {
+  const scaleRun = prog === null;
+  const { error } = await db.from('exercises').upsert({
+    title: $('tab-title').textContent, technique: scaleRun ? 'Scale' : 'Chord changes', alphatex: loaded,
+    goal: scaleRun ? 'Even 8th notes up and back down, every note the same length and volume.' : 'Change chords in time without stopping the strumming hand.',
+    start_bpm: 60, target_bpm: 120, current_bpm: 60, drill: `resources:${root}:${name}:${scaleRun ? `position${pos ?? 0}` : `progression${prog}`}`, level: 0,
+  }, { onConflict: 'user_id,drill,level', ignoreDuplicates: true }); // adding it twice keeps the first one and its progress
+  $('practise-msg').innerHTML = error ? `<span class="error">Could not add it: ${esc(error.message)}</span>` : 'It\'s in your drills. <a href="/practice.html">Open Practice →</a>';
+};
+
 $('chords').onclick = e => {
   const c = e.target.closest('[data-chord]'), p = e.target.closest('[data-prog]');
   if (c) {

@@ -1,6 +1,6 @@
 # GuitarHub
 
-A small local web app for practicing guitar from Guitar Pro tabs:
+A small web app for practicing guitar from Guitar Pro tabs:
 
 - **Library**: upload `.gp3` / `.gp4` / `.gp5` / `.gpx` / `.gp` files, then tag and search them.
 - **PDF import**: upload a PDF exported from Guitar Pro (standard notation + tab) and it's converted into a playable tab. You check the result before it's added. Scanned pages and screenshots can't be read.
@@ -10,13 +10,16 @@ A small local web app for practicing guitar from Guitar Pro tabs:
 - **Practice**: built-in technique drills, each with a tempo ladder: mark a run "clean" and the tempo goes up 5 bpm, reach the target and the next level unlocks. A calendar shows the days you practiced and your streak.
 - **Practice log**: on any tab, log what you practiced (bars, clean tempo, what felt hard).
 
-It runs on your own machine only, for a single user with no login.
+Sign in with Google and you get your own private library. Tabs, fingering edits and the practice log are stored in [Supabase](https://supabase.com), so they follow you to any browser.
 
-## Requirements
+## Running your own copy
 
-- [Node.js](https://nodejs.org) 22.13 or newer (it uses the built-in `node:sqlite`; developed on Node 24).
+You need [Node.js](https://nodejs.org) 20 or newer and a free Supabase project.
 
-## Setup
+1. In Supabase, create a project and run `supabase/schema.sql` in the SQL editor. It creates the tables, the file bucket and the access rules that keep each user's data private.
+2. Under Authentication → Providers, turn **Email** off and turn **Google** on, using an OAuth client from Google Cloud whose redirect URI is `https://<project ref>.supabase.co/auth/v1/callback`.
+3. Under Authentication → URL Configuration, add `http://localhost:3000/` and your site's URL to the redirect URLs.
+4. Put the project URL and publishable key in `public/db.js`. Both are meant to be public; the access rules in `schema.sql` are what protect the data.
 
 ```sh
 git clone https://github.com/pabloroman/guitarhub.git
@@ -25,11 +28,13 @@ npm install
 npm start
 ```
 
-Then open http://localhost:3000.
+Then open http://localhost:3000. Use `localhost`, not `127.0.0.1`, or the Google sign-in can't redirect back. The dev server only serves files; it uses the same Supabase project as the hosted site.
 
-The server listens on `127.0.0.1` only. Set `PORT` to use a different port (`PORT=4000 npm start`).
+## Deploying
 
-Your tabs, fingering edits and practice log are stored in `data/`, which is created on first run and excluded from git. Back up that folder to keep your library.
+The site is static. `npm run build` assembles it in `dist/`, and `vercel.json` tells [Vercel](https://vercel.com) to run that on every push to `main`.
+
+Supabase's free tier may pause a project after about a week with little activity. Nothing is lost and it can be resumed from the dashboard, but the site is down until then. The free tier also has no backups.
 
 ## Tests
 
@@ -58,8 +63,8 @@ The weights are at the top of `optimizer.js`. They're tuned against the test cas
 
 ## Stack
 
-- Node's built-in `http` and `sqlite` modules, with no framework.
-- Plain HTML and JavaScript, with no build step.
+- Plain HTML and JavaScript, with no framework and no bundler: the build only copies files.
+- [Supabase](https://supabase.com) for the database, tab files and sign-in. The browser talks to it directly, and row-level security keeps each user's data private.
 - [alphaTab](https://alphatab.net) for parsing, rendering and playing the tabs.
 
 ## How the PDF import works

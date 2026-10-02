@@ -9,6 +9,7 @@ A small web app for practicing guitar from Guitar Pro tabs:
 - **Fingering optimizer**: suggests easier fingerings, for example keeping a phrase in one hand position instead of jumping around the neck. You review the suggestions bar by bar and accept the ones you like. Accepted changes are stored separately, so your original file is never modified.
 - **Practice**: built-in technique drills, each with a tempo ladder: mark a run "clean" and the tempo goes up 5 bpm, reach the target and the next level unlocks. A calendar shows the days you practiced and your streak.
 - **Practice log**: on any tab, log what you practiced (bars, clean tempo, what felt hard).
+- **Resources**: pick a key (major or natural minor) to see its seven chords as chord boxes, or the scale's notes across the fretboard.
 
 Sign in with Google and you get your own private library. Tabs, fingering edits and the practice log are stored in [Supabase](https://supabase.com), so they follow you to any browser.
 
@@ -42,7 +43,7 @@ Supabase's free tier may pause a project after about a week with little activity
 npm test
 ```
 
-The tests cover the fingering optimizer and the PDF import. The optimizer tests include a few real passages where a player's preferred fingering is used as the expected answer. The PDF tests convert the Guitar Pro exports in `test/fixtures/`.
+The tests cover the fingering optimizer, the PDF import, the drills and the chord shapes on the Resources page. The optimizer tests include a few real passages where a player's preferred fingering is used as the expected answer. The PDF tests convert the Guitar Pro exports in `test/fixtures/`.
 
 ## How the fingering optimizer works
 

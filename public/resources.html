@@ -12,11 +12,16 @@
   <nav><a href="/">Library</a><a href="/practice.html">Practice</a><a href="/resources.html" class="on">Resources</a></nav>
 </header>
 <main>
-  <h1>Resources</h1>
-  <p class="muted" style="margin-top: 0">Pick a key to see where the scale sits on the neck and which chords belong to it.</p>
-  <div class="row" style="margin: 16px 0">
-    <label class="muted">Root <select id="root"></select></label>
-    <label class="muted">Scale <select id="scale"></select></label>
+  <div class="row" style="align-items: start; margin-bottom: 16px">
+    <div style="flex: 1; min-width: 260px">
+      <h1>Resources</h1>
+      <p class="muted" style="margin-top: 0">Pick a key to see where the scale sits on the neck and which chords belong to it.</p>
+      <div class="row" style="margin-top: 16px">
+        <label class="muted">Root <select id="root"></select></label>
+        <label class="muted">Scale <select id="scale"></select></label>
+      </div>
+    </div>
+    <div id="circle" class="circle"></div>
   </div>
   <h2 id="neck-title"></h2>
   <div class="panel">
@@ -50,6 +55,7 @@ import { alphaTab, createPlayer } from '/player.js';
 import { SCALES, OPEN, PROGRESSIONS, scale, chords, positions, scaleTex, chordsTex } from '/theory.js';
 
 const $ = id => document.getElementById(id);
+const isMinor = notes => notes.some(n => n.degree === 'b3'); // which ring of the circle of fifths a scale belongs to
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 const api = createPlayer(document.querySelector('.player'));
 const FRETS = 17;
@@ -110,6 +116,20 @@ function fretboard(title, dot) {
   </svg>`;
 }
 
+// Circle of fifths: major keys outside, their relative minors inside, each a fifth above the one before it.
+// The current key is filled and the keys either side of it, which share all but one note, are tinted.
+function circle(minor) {
+  const pt = (r, deg) => [Math.cos, Math.sin].map(f => (r * f(deg * Math.PI / 180)).toFixed(1));
+  const ring = (r0, r1, inner) => Array.from({ length: 12 }, (_, i) => {
+    const pc = (i * 7 + (inner ? 9 : 0)) % 12, a = i * 30 - 105, at = inner === minor && (pc - root + 12) % 12;
+    const key = scale(pc, inner ? 'Minor' : 'Major')[0].name, [x, y] = pt((r0 + r1) / 2, a + 15);
+    return `<path d="M${pt(r1, a)}A${r1} ${r1} 0 0 1 ${pt(r1, a + 30)}L${pt(r0, a + 30)}A${r0} ${r0} 0 0 0 ${pt(r0, a)}Z" class="${at === 0 ? 'on' : at === 5 || at === 7 ? 'near' : ''}"
+      data-pc="${pc}" data-scale="${inner ? 'Minor' : 'Major'}" role="button" tabindex="0" aria-pressed="${at === 0}" aria-label="${key} ${inner ? 'minor' : 'major'}"/>
+      <text x="${x}" y="${+y + 4}" style="font-size: ${inner ? 10 : 12}px">${key}${inner ? 'm' : ''}</text>`;
+  }).join('');
+  return `<svg viewBox="-100 -100 200 200" width="190" role="group" aria-label="Circle of fifths">${ring(64, 98, false)}${ring(34, 64, true)}</svg>`;
+}
+
 function render() {
   const notes = scale(root, name), key = `${notes[0].name} ${name}`, list = chords(root, name), boxes = positions(OPEN, notes, FRETS);
   if (pos >= boxes.length) pos = null;
@@ -120,6 +140,8 @@ function render() {
   history.replaceState(null, '', `?${new URLSearchParams({ root, scale: name })}`);
   // a root is written differently from scale to scale: Db major, C# minor
   $('root').innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i}" ${i === root ? 'selected' : ''}>${scale(i, name)[0].name}</option>`).join('');
+
+  $('circle').innerHTML = circle(isMinor(notes));
 
   $('neck-title').textContent = chord ? `${chord.name} ${chord.quality} in ${key}` : key;
   $('pos').textContent = box ? `Position ${pos + 1} of ${boxes.length}` : 'All positions';
@@ -162,6 +184,18 @@ $('all').onclick = () => { pos = null; render(); };
 const step = by => () => { const n = positions(OPEN, scale(root, name), FRETS).length; pos = pos === null ? (by > 0 ? 0 : n - 1) : (pos + by + n) % n; render(); };
 $('prev').onclick = step(-1);
 $('next').onclick = step(1);
+// a wedge sets the root; the scale only changes when you cross between the major and minor rings (A minor pentatonic -> E minor pentatonic)
+const pickKey = e => {
+  const w = e.target.closest('[data-pc]');
+  if (!w || (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ')) return;
+  e.preventDefault();
+  root = +w.dataset.pc; picked = null;
+  if (isMinor(scale(root, name)) !== (w.dataset.scale === 'Minor')) { name = $('scale').value = w.dataset.scale; prog = null; }
+  render();
+  $('circle').querySelector('.on').focus(); // render replaced the wedge that had focus
+};
+$('circle').onclick = $('circle').onkeydown = pickKey;
+
 // what the player is showing becomes a drill on the Practice page, with the same tempo ladder as the built-in ones
 $('practise').onclick = async () => {
   const scaleRun = prog === null;

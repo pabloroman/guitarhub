@@ -25,6 +25,7 @@
       <span id="pos" role="status" style="min-width: 13ch; text-align: center"></span>
       <button id="next" class="icon" aria-label="Next position">›</button>
       <button id="all" class="toggle">Whole neck</button>
+      <button id="play" disabled>Play scale</button>
       <button id="degrees" class="toggle" style="margin-left: auto">Degrees</button>
     </div>
     <div id="neck" class="neck"></div>
@@ -32,13 +33,20 @@
   </div>
   <h2 id="chords-title"></h2>
   <div id="chords"></div>
+  <h2 id="tab-title" style="margin-top: 24px"></h2>
+  <div class="player">
+    <div class="at-controls"></div>
+    <div class="at-score"></div>
+  </div>
 </main>
 <script src="/supabase/supabase.js"></script>
 <script type="module">
 import '/db.js'; // sign-in gate and the Sign out button
-import { SCALES, OPEN, scale, chords, positions } from '/theory.js';
+import { alphaTab, createPlayer } from '/player.js';
+import { SCALES, OPEN, PROGRESSIONS, scale, chords, positions, scaleTex, chordsTex } from '/theory.js';
 
 const $ = id => document.getElementById(id);
+const api = createPlayer(document.querySelector('.player'));
 const FRETS = 17;
 // a chord's notes counted from its own root, for the Degrees labels while a chord is picked
 const TONE = { 0: '1', 3: 'b3', 4: '3', 6: 'b5', 7: '5', 8: '#5' };
@@ -47,6 +55,20 @@ const params = new URLSearchParams(location.search);
 let root = Math.abs(parseInt(params.get('root')) || 0) % 12;
 let name = Object.hasOwn(SCALES, params.get('scale')) ? params.get('scale') : 'Major';
 let label = 'name', pos = null, picked = null; // pos and picked index the scale's positions and chords; null is "all"
+let prog = null; // index of the progression in the player; null is the scale
+
+// The player shows the current position, or the chosen progression. Loading takes a moment, so "play" may have to wait for it.
+let loaded = '', loading = false, autoplay = false;
+function load(tex) {
+  if (tex === loaded) return;
+  loaded = tex; loading = true;
+  api.stop();
+  api.tex(tex);
+}
+const play = () => { if (loading) autoplay = true; else api.play(); };
+api.playerReady.on(() => { loading = false; $('play').disabled = false; if (autoplay) { autoplay = false; api.play(); } });
+const playLabel = () => { $('play').textContent = api.playerState === 1 && prog === null ? 'Pause' : 'Play scale'; };
+api.playerStateChanged.on(playLabel);
 
 // six strings across, five frets down
 function chordBox(frets) {
@@ -86,6 +108,9 @@ function render() {
   const notes = scale(root, name), key = `${notes[0].name} ${name}`, list = chords(root, name), boxes = positions(OPEN, notes, FRETS);
   if (pos >= boxes.length) pos = null;
   const box = boxes[pos], chord = list[picked]; // undefined when showing everything
+  // progressions for keys whose tonic chord is major, or minor; none for scales without chords
+  const sets = list.length ? PROGRESSIONS[list[0].quality === 'Major' ? 'Major' : 'Minor'] : [];
+  const progName = p => p.name ?? p.degrees.map(i => list[i].numeral).join(' – ');
   history.replaceState(null, '', `?${new URLSearchParams({ root, scale: name })}`);
   // a root is written differently from scale to scale: Db major, C# minor
   $('root').innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i}" ${i === root ? 'selected' : ''}>${scale(i, name)[0].name}</option>`).join('');
@@ -109,19 +134,43 @@ function render() {
   $('chords').innerHTML = list.length ? `<div class="chords">${list.map((c, i) => `<button class="card" data-chord="${i}" aria-pressed="${i === picked}" aria-label="${c.numeral}, ${c.name} ${c.quality}: ${c.frets.map(f => f < 0 ? 'x' : f).join(' ')}">
       <span class="muted">${c.numeral}</span>
       <b>${c.name} <span class="muted">${c.quality}</span></b>${chordBox(c.frets)}
-    </button>`).join('')}</div><p class="muted">Pick a chord to see its notes on the neck.</p>`
+    </button>`).join('')}</div>
+    <p class="muted">Pick a chord to hear it and see its notes on the neck, or play along with a progression:</p>
+    <div class="row">${sets.map((p, i) => `<button class="toggle" data-prog="${i}" aria-pressed="${i === prog}">${progName(p)}</button>`).join('')}</div>`
     : `<p class="muted">Chords are built by stacking thirds on a seven-note scale, and ${name} has ${notes.length} notes.</p>`;
+
+  $('tab-title').textContent = sets[prog] ? `${progName(sets[prog])} in ${key}` : `${key}, position ${(pos ?? 0) + 1}`;
+  playLabel();
+  load(sets[prog] ? chordsTex(OPEN, sets[prog].degrees.map(i => list[i])) : scaleTex(OPEN, box ?? boxes[0]));
 }
 
 $('scale').innerHTML = Object.keys(SCALES).map(s => `<option ${s === name ? 'selected' : ''}>${s}</option>`).join('');
 $('root').onchange = e => { root = +e.target.value; picked = null; render(); };
-$('scale').onchange = e => { name = e.target.value; picked = null; render(); };
+$('scale').onchange = e => { name = e.target.value; picked = prog = null; render(); };
+$('play').onclick = () => {
+  if (api.playerState === 1 && prog === null) return api.pause();
+  prog = null; render(); play();
+};
 $('degrees').onclick = () => { label = label === 'name' ? 'degree' : 'name'; render(); };
 $('all').onclick = () => { pos = null; render(); };
 const step = by => () => { const n = positions(OPEN, scale(root, name), FRETS).length; pos = pos === null ? (by > 0 ? 0 : n - 1) : (pos + by + n) % n; render(); };
 $('prev').onclick = step(-1);
 $('next').onclick = step(1);
-$('chords').onclick = e => { const c = e.target.closest('[data-chord]'); if (c) { picked = picked === +c.dataset.chord ? null : +c.dataset.chord; render(); } };
+$('chords').onclick = e => {
+  const c = e.target.closest('[data-chord]'), p = e.target.closest('[data-prog]');
+  if (c) {
+    picked = picked === +c.dataset.chord ? null : +c.dataset.chord;
+    // strum it, unless that would interrupt what is playing: a one-chord tab that is never shown, only played
+    const chord = chords(root, name)[picked];
+    if (chord && api.playerState !== 1) api.playBeat(alphaTab.importer.ScoreLoader.loadAlphaTex(chordsTex(OPEN, [chord], 1)).tracks[0].staves[0].bars[0].voices[0].beats[0]);
+  }
+  if (p) {
+    prog = prog === +p.dataset.prog ? null : +p.dataset.prog;
+    if (prog === null) api.stop(); else api.setLooping(true);
+  }
+  if (c || p) render();
+  if (p && prog !== null) play();
+};
 render();
 </script>
 </body>

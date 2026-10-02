@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SCALES, OPEN, scale, chords, positions } from './public/theory.js';
+import * as alphaTab from '@coderline/alphatab';
+import { SCALES, OPEN, PROGRESSIONS, scale, chords, positions, scaleTex, chordsTex } from './public/theory.js';
 
 const names = (root, s) => scale(root, s).map(n => n.name).join(' ');
 const numerals = (root, s) => chords(root, s).map(c => c.numeral).join(' ');
@@ -48,5 +49,27 @@ for (const s in SCALES) test(`${s} positions climb the scale on every root`, () 
       if (notes.length !== 6) for (let string = 0; string < 6; string++) assert.equal(p.filter(n => n.string === string).length, notes.length === 7 ? 3 : 2);
     }
     assert.equal((OPEN[0] + all[0][0].fret) % 12, root, 'position 1 starts on the root');
+  }
+});
+
+// a 4/4 bar is 3840 ticks (960 per quarter)
+const fullBars = tex => {
+  const bars = alphaTab.importer.ScoreLoader.loadAlphaTex(tex).tracks[0].staves[0].bars;
+  for (const b of bars) assert.equal(b.voices[0].beats.reduce((t, x) => t + x.playbackDuration, 0), 3840, `bar ${b.index + 1} of ${tex}`);
+  return bars;
+};
+
+for (const s in SCALES) test(`${s} positions and progressions make playable tab`, () => {
+  for (let root = 0; root < 12; root++) {
+    const notes = scale(root, s), list = chords(root, s);
+    for (const p of positions(OPEN, notes)) {
+      const played = fullBars(scaleTex(OPEN, p)).flatMap(b => b.voices[0].beats).filter(b => !b.isRest).map(b => b.notes[0].realValue);
+      assert.deepEqual(played.slice(0, p.length), p.map(n => OPEN[n.string] + n.fret));
+    }
+    if (list.length) for (const set of Object.values(PROGRESSIONS)) for (const { degrees } of set) {
+      const bars = fullBars(chordsTex(OPEN, degrees.map(i => list[i])));
+      assert.equal(bars.length, degrees.length);
+      assert.deepEqual(bars[0].voices[0].beats[0].notes.map(n => n.realValue % 12).sort(), [...list[degrees[0]].frets.flatMap((f, i) => f < 0 ? [] : (OPEN[i] + f) % 12)].sort());
+    }
   }
 });

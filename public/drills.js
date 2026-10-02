@@ -1,6 +1,8 @@
 // Built-in technique drills. Each level is a 2-bar loop; reaching a level's target_bpm unlocks the next one.
 // Notes are fret.string (string 1 = high E), `*n` repeats a beat, {pm} = palm mute, {h} = hammer-on/pull-off to the next note.
-const tex = body => `\\track "Guitar" \\staff {tabs} \\tuning (E4 B3 G3 D3 A2 E2)\n${body}`;
+import { OPEN, tabTex } from './theory.js';
+
+const tex = body => tabTex(OPEN, body);
 const gallop = (...chords) => chords.map(c => `:8 ${c} :16 ${c} ${c}`).join(' ');        // 8th + two 16ths
 const reverse = (...chords) => chords.map(c => `:16 ${c} ${c} :8 ${c}`).join(' ');       // two 16ths + 8th
 const pm = (...notes) => `(${notes.map(n => `${n}{pm}`).join(' ')})`;

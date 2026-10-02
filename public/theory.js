@@ -87,3 +87,30 @@ export function chords(root, name) {
       numeral: r.degree.slice(0, -1) + numeral + ({ Diminished: '°', Augmented: '+' }[quality] ?? '') };
   });
 }
+
+// ---------- tab (alphaTex) for the player ----------
+
+const pitchName = m => SHARP[m % 12] + (Math.floor(m / 12) - 1);
+// the track header every generated tab starts with; alphaTex counts strings from the highest
+export const tabTex = (open, body) => `\\track "Guitar" \\staff {tabs} \\tuning (${[...open].reverse().map(pitchName).join(' ')})\n${body}`;
+
+// a position up and back down in 8th notes, resting out the last bar
+export function scaleTex(open, position) {
+  const run = [...position, ...position.slice(0, -1).reverse()].map(n => `${n.fret}.${open.length - n.string}`);
+  while (run.length % 8) run.push('r');
+  return `\\tempo 90\n${tabTex(open, `:8 ${run.map((n, i) => (i + 1) % 8 ? n : `${n} |`).join(' ')}`)}`;
+}
+
+const SYMBOL = { Major: '', Minor: 'm', Diminished: 'dim', Augmented: 'aug' };
+// one bar per chord, strummed 1, 2 or 4 times, with the chord's name above it
+export const chordsTex = (open, chords, strums = 4) => `\\tempo 90\n${tabTex(open, chords.map(c => {
+  const beat = `(${c.frets.flatMap((f, s) => f < 0 ? [] : `${f}.${open.length - s}`).join(' ')})`;
+  return `:${strums} ${beat}{ch "${c.name}${SYMBOL[c.quality]}"} ${`${beat} `.repeat(strums - 1)}|`;
+}).join(' '))}`;
+
+// chord progressions as degrees of the key (0 is the tonic), for keys with a major and with a minor tonic chord
+const BLUES = { name: '12-bar blues', degrees: [0, 0, 0, 0, 3, 3, 0, 0, 4, 3, 0, 4] };
+export const PROGRESSIONS = {
+  Major: [{ degrees: [0, 4, 5, 3] }, { degrees: [0, 3, 4] }, { degrees: [1, 4, 0] }, BLUES],
+  Minor: [{ degrees: [0, 5, 2, 6] }, { degrees: [0, 3, 4] }, { degrees: [0, 6, 5, 4] }, BLUES],
+};

@@ -72,6 +72,8 @@ export function positions(open, notes, maxFret = 17) {
   }).filter(p => p.every(n => n.fret <= maxFret)); // drop one that runs off the end of the neck
 }
 
+// a pitch class under both its names where it has two: "C#/Db"
+export const pitchClassName = pc => SHARP[pc] === FLAT[pc] ? SHARP[pc] : `${SHARP[pc]}/${FLAT[pc]}`;
 // "Drop D", or the open strings' notes for a tuning without a name ("C G C F A D")
 export const tuningName = open => Object.keys(TUNINGS).find(t => TUNINGS[t].join() === open.join()) ?? open.map(m => SHARP[m % 12]).join(' ');
 

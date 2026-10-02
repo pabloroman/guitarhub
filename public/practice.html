@@ -163,10 +163,10 @@ const today = ymd(new Date());
 async function loadCalendar() {
   // ponytail: Supabase returns at most 1000 rows, so this is the newest 1000 runs; beyond that older months go blank
   // and the streak tops out. Fetch only the visible month, and count the streak in SQL, when that starts to show.
-  const { data, error } = await db.from('sessions').select('at, bpm, notes, exercise_id, tabs(title), exercises(title)')
+  const { data, error } = await db.from('sessions').select('*, tabs(title), exercises(title)') // *: `activity` only exists once the schema has it
     .order('at', { ascending: false });
   if (error) { $('cal-day').innerHTML = `<span class="error">Could not load the calendar: ${esc(error.message)}</span>`; return; }
-  sessions = data.map(s => ({ ...s, day: ymd(new Date(s.at)), what: s.tabs?.title ?? s.exercises?.title }));
+  sessions = data.map(s => ({ ...s, day: ymd(new Date(s.at)), what: s.tabs?.title ?? s.exercises?.title ?? s.activity }));
   day ??= today;
   renderCalendar();
 }
@@ -196,7 +196,7 @@ function renderCalendar() {
     const clean = runs.filter(s => s.notes === 'clean').length, best = Math.max(...runs.map(s => s.bpm ?? 0));
     return `<div style="padding: 6px 0; border-bottom: 1px solid var(--line)">
       <div style="color: var(--text)">${esc(what)}</div>
-      <div>${runs.length} run${runs.length === 1 ? '' : 's'}${best ? ` · up to ${best} bpm` : ''}${runs[0].exercise_id ? ` · ${clean} clean` : ''}</div>
+      <div>${runs.length} run${runs.length === 1 ? '' : 's'}${best ? ` · up to ${best} bpm` : ''}${runs[0].exercise_id ? ` · ${clean} clean` : ''}${runs[0].activity ? ` · ${esc(runs[0].notes)}` : ''}</div>
     </div>`;
   }).join('') || 'Nothing logged this day.';
 }

@@ -26,7 +26,9 @@ create table sessions (
   tab_id bigint references tabs on delete set null,
   exercise_id bigint references exercises on delete set null,
   bars text, bpm int, target_bpm int, rating int, notes text,
+  activity text,  -- what was practised when it's neither a tab nor an exercise, e.g. the fretboard note trainer
   at timestamptz not null default now());
+-- A project created before `activity` existed needs: alter table sessions add column activity text;
 create index on tabs (user_id);
 create index on sessions (user_id, at desc);
 create index on sessions (tab_id);

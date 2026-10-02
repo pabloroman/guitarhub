@@ -7,14 +7,14 @@ A small local web app for practicing guitar from Guitar Pro tabs:
 - **Player**: renders the tab and plays it back. You can set the speed in bpm, drag across bars to loop them, and turn on a metronome and count-in. The **Print** button opens a page-sized version of the current track to print or save as a PDF.
 - **Speed trainer**: loops the selected bars and raises the tempo every few loops, e.g. from 70% to 100% in 5% steps every 3 loops. A **Too fast** button drops back one step.
 - **Fingering optimizer**: suggests easier fingerings, for example keeping a phrase in one hand position instead of jumping around the neck. You review the suggestions bar by bar and accept the ones you like. Accepted changes are stored separately, so your original file is never modified.
-- **Tutor**: log what you practiced (bars, clean tempo, what felt hard) and get exercises built from those passages. Each exercise has a tempo ladder: mark a run "clean" and the tempo goes up 5 bpm.
+- **Practice**: built-in technique drills, each with a tempo ladder: mark a run "clean" and the tempo goes up 5 bpm, reach the target and the next level unlocks. A calendar shows the days you practiced and your streak.
+- **Practice log**: on any tab, log what you practiced (bars, clean tempo, what felt hard).
 
 It runs on your own machine only, for a single user with no login.
 
 ## Requirements
 
 - [Node.js](https://nodejs.org) 22.13 or newer (it uses the built-in `node:sqlite`; developed on Node 24).
-- For the tutor only: [Claude Code](https://claude.com/claude-code), installed and logged in. The tutor runs `claude -p` in the background, so its usage counts against your Claude Code plan. No API key is needed. Everything else works without it.
 
 ## Setup
 

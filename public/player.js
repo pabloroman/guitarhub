@@ -2,7 +2,6 @@ import * as alphaTab from '/vendor/alphaTab.mjs';
 export { alphaTab };
 
 const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-export const noteName = midi => NAMES[midi % 12] + (Math.floor(midi / 12) - 1);
 // staff.tuning is highest string first; show it low -> high like guitarists say it ("D A D G B E")
 export const tuningLabel = staff => staff.tuningName || [...staff.tuning].reverse().map(m => NAMES[m % 12]).join(' ');
 
@@ -103,23 +102,9 @@ export function createPlayer(root) {
 
   api.setSpeed = pct => { api.playbackSpeed = pct / 100; showSpeed(); };
   api.speedPct = () => Math.round(api.playbackSpeed * 100);
-  // tempo in bpm instead of percent (tutor's tempo ladder, practice log)
+  // tempo in bpm instead of percent (drill tempo ladder, practice log)
   api.setBpm = bpm => { if (api.score) api.setSpeed((bpm / baseTempo()) * 100); };
   api.currentBpm = () => (api.score ? Math.round(baseTempo() * api.playbackSpeed) : null);
   api.setLooping = on => { api.isLooping = on; $('.loop').ariaPressed = on; };
   return api;
-}
-
-// Compact alphaTex for bars [from, to] (1-based) of a staff — fed to the tutor as the "problem passage".
-export function barsToTex(staff, from, to) {
-  const n = staff.tuning.length;
-  const bars = staff.bars.slice(from - 1, to).map(bar => bar.voices[0].beats.map(b => {
-    const fx = [b.dots ? 'd' : '', b.tupletNumerator > 1 ? `tu ${b.tupletNumerator}` : '', b.tremoloSpeed ? `tp ${b.tremoloSpeed / 2}` : '']
-      .filter(Boolean).join(' ');
-    const dur = `.${b.duration}${fx ? `{${fx}}` : ''}`;
-    if (b.isRest || !b.notes.length) return `r${dur}`;
-    const notes = b.notes.map(nt => `${nt.fret}.${n + 1 - nt.string}${nt.isPalmMute ? '{pm}' : ''}`);
-    return (notes.length > 1 ? `(${notes.join(' ')})` : notes[0]) + dur;
-  }).join(' '));
-  return `\\tuning (${staff.tuning.map(noteName).join(' ')})\n${bars.join(' |\n')}`;
 }

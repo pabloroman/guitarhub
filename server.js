@@ -1,10 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import { spawn } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
-import * as alphaTab from '@coderline/alphatab';
 import { DRILLS } from './public/drills.js';
 
 const PORT = process.env.PORT || 3000;
@@ -113,103 +110,7 @@ const routes = {
     db.prepare('DELETE FROM exercises WHERE id = ?').run(id);
     json(res, { ok: true });
   },
-  'POST /api/tutor': async (req, res) => {
-    const { request = '' } = JSON.parse((await body(req)).toString() || '{}');
-    const exercises = await tutor(request);
-    const insert = db.prepare(`INSERT INTO exercises (title, goal, technique, alphatex, start_bpm, target_bpm, current_bpm)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`);
-    for (const e of exercises) insert.run(e.title, e.goal, e.technique, e.alphatex, e.start_bpm, e.target_bpm, e.start_bpm);
-    json(res, { created: exercises.length });
-  },
 };
-
-// ---------- tutor ----------
-
-const PROFILE = `Player: advanced beginner / intermediate guitarist. Reads tab and notation, plays reasonably well,
-main goals are SPEED and ACCURACY. Favorite genres: classic heavy metal and black metal (Gorgoroth, Satyricon, Bathory,
-Celtic Frost, Therion, Mercyful Fate, Windir, Judas Priest).`;
-
-const SYSTEM = `You are a guitar tutor designing short, focused practice exercises.
-${PROFILE}
-
-Each exercise is written in alphaTex (alphaTab's text notation) so it can be rendered and played back. Rules:
-- Start with: \\title "<title>" \\tempo <start_bpm> then a line with a single "." then \\track "Guitar" \\staff {tabs} and \\tuning (...) listing the strings from highest to lowest, e.g. \\tuning (E4 B3 G3 D3 A2 E2).
-- Notes are fret.string where string 1 is the HIGHEST string and 6 the lowest (e.g. 0.6 = open low string). Chords: (0.6 2.5 2.4). Rests: r.
-- Durations: ":8" sets eighth notes for following beats, ":16" sixteenths, etc. Bars are separated by "|".
-- Palm mute: 0.6{pm}. Keep each exercise 2-8 bars so it can be looped.
-- Use the same tuning as the song the problem passage comes from.
-Base exercises on the player's logged problem passages (given as alphaTex excerpts) when available: isolate the hard
-movement, then build it back up. Otherwise use genre techniques: tremolo picking, downpicked gallops, string skipping,
-alternate picking bursts, twin-lead style runs. Set start_bpm where the player is currently clean and target_bpm realistic.`;
-
-const SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['exercises'],
-  properties: {
-    exercises: {
-      type: 'array',
-      items: {
-        type: 'object', additionalProperties: false,
-        required: ['title', 'goal', 'technique', 'alphatex', 'start_bpm', 'target_bpm'],
-        properties: {
-          title: { type: 'string' }, goal: { type: 'string' }, technique: { type: 'string' },
-          alphatex: { type: 'string' }, start_bpm: { type: 'integer' }, target_bpm: { type: 'integer' },
-        },
-      },
-    },
-  },
-};
-
-// Runs Claude Code headless (`claude -p`), so usage counts against the Claude Code plan instead of API billing.
-function ask(prompt) {
-  const args = ['-p', '--model', 'sonnet', '--output-format', 'json', '--json-schema', JSON.stringify(SCHEMA),
-    '--system-prompt', SYSTEM, '--tools', '', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence'];
-  return new Promise((resolve, reject) => {
-    // run outside the project so no CLAUDE.md / project settings leak into the tutor
-    const child = spawn('claude', args, { cwd: os.tmpdir(), stdio: ['pipe', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    child.stdout.on('data', d => { out += d; });
-    child.stderr.on('data', d => { err += d; });
-    child.on('error', e => reject(e.code === 'ENOENT' ? new Error('Claude Code CLI not found: install it and run `claude` once to log in.') : e));
-    child.on('close', code => {
-      let r;
-      try { r = JSON.parse(out); } catch { return reject(new Error(`Claude Code failed (exit ${code}): ${(err || out).trim().slice(0, 300)}`)); }
-      if (r.is_error || !r.structured_output) return reject(new Error(`Claude Code: ${r.result || r.subtype || 'no exercises returned'}`));
-      resolve(r.structured_output.exercises);
-    });
-    child.stdin.end(prompt);
-  });
-}
-
-const texError = tex => {
-  try { alphaTab.importer.ScoreLoader.loadAlphaTex(tex); return null; } catch (e) { return String(e.message ?? e); }
-};
-
-async function tutor(request) {
-  const sessions = db.prepare(`SELECT s.*, t.title, t.artist, t.tuning FROM sessions s LEFT JOIN tabs t ON t.id = s.tab_id
-    WHERE s.exercise_id IS NULL ORDER BY s.at DESC LIMIT 10`).all();
-  const existing = db.prepare('SELECT title, technique, start_bpm, current_bpm, target_bpm FROM exercises ORDER BY id DESC LIMIT 20').all();
-  const prompt = `Recent practice sessions (newest first):
-${sessions.map(s => `- ${s.artist ?? ''} - ${s.title ?? 'free practice'} (tuning ${s.tuning ?? '?'}), bars ${s.bars}: clean at ${s.bpm ?? '?'} bpm, target ${s.target_bpm ?? '?'}, accuracy ${s.rating ?? '?'}/5. Notes: ${s.notes}${s.excerpt ? `\n  Excerpt:\n  ${s.excerpt}` : ''}`).join('\n') || '(none logged yet)'}
-
-Exercises already in progress (avoid duplicates, build on them):
-${existing.map(e => `- ${e.title} [${e.technique}] ${e.current_bpm}/${e.target_bpm} bpm`).join('\n') || '(none)'}
-
-${request ? `Player's request: ${request}\n` : ''}Create 3 new exercises.`;
-
-  const first = await ask(prompt);
-  const bad = first.map((e, i) => ({ i, err: texError(e.alphatex) })).filter(x => x.err);
-  if (!bad.length) return first;
-
-  // one retry: show the parse errors and ask for corrected versions
-  const retry = `${prompt}
-
-You already answered with:
-${JSON.stringify(first)}
-
-These exercises have alphaTex errors. Return ALL exercises again with the errors fixed:
-${bad.map(b => `#${b.i + 1} "${first[b.i].title}": ${b.err}`).join('\n')}`;
-  return (await ask(retry)).filter(e => !texError(e.alphatex));
-}
 
 // ---------- server ----------
 

@@ -44,7 +44,7 @@
       </section>
 
       <section class="panel">
-        <h2>Log practice <span class="help" tabindex="0">?<span class="tip" role="tooltip">What you log here is what the tutor builds exercises from.</span></span></h2>
+        <h2>Log practice <span class="help" tabindex="0">?<span class="tip" role="tooltip">Logged sessions show in History below and on the Practice calendar.</span></span></h2>
         <form id="log">
           <div class="row">
             <div style="flex:1"><label for="bar-from">From bar</label><input id="bar-from" type="number" min="1"></div>
@@ -65,7 +65,7 @@
           <textarea id="notes" placeholder="e.g. right hand loses sync on the string change in the tremolo part"></textarea>
           <div class="row" style="margin-top: 8px; justify-content: space-between">
             <button class="primary">Save session</button>
-            <a href="/practice.html" class="muted">Get exercises →</a>
+            <a href="/practice.html" class="muted">Practice drills →</a>
           </div>
           <p id="log-msg" class="muted"></p>
         </form>
@@ -108,7 +108,7 @@
   </div>
 </main>
 <script type="module">
-import { alphaTab, createPlayer, barsToTex, tuningLabel, guitarTracks, barTempos } from '/player.js';
+import { alphaTab, createPlayer, tuningLabel, guitarTracks, barTempos } from '/player.js';
 import { optimize, STYLES } from '/optimizer.js';
 
 const $ = id => document.getElementById(id);
@@ -324,11 +324,10 @@ renderSessions(tab.sessions);
 $('log').onsubmit = async e => {
   e.preventDefault();
   const from = +$('bar-from').value || null, to = +$('bar-to').value || from;
-  const excerpt = from ? barsToTex(staff(), from, Math.min(to, from + 7)) : ''; // cap at 8 bars
   const s = { tab_id: +id, bars: from ? `${from}-${to}` : '', bpm: +$('bpm').value, target_bpm: +$('target').value,
-    rating: +$('rating').value, notes: $('notes').value, excerpt };
+    rating: +$('rating').value, notes: $('notes').value };
   const r = await fetch('/api/sessions', { method: 'POST', body: JSON.stringify(s) });
-  $('log-msg').textContent = r.ok ? 'Saved. The tutor will use this next time you ask for exercises.' : 'Could not save.';
+  $('log-msg').textContent = r.ok ? 'Saved.' : 'Could not save.';
   if (r.ok) {
     $('notes').value = '';
     renderSessions((await (await fetch(`/api/tabs/${id}`)).json()).sessions);

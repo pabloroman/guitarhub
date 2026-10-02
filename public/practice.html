@@ -30,13 +30,6 @@
         <h2>Drills</h2>
         <div id="drills"></div>
       </section>
-      <section class="panel">
-        <h2>AI Tutor <span class="help" tabindex="0">?<span class="tip" role="tooltip">Builds exercises from the passages you log on your tabs.</span></span></h2>
-        <textarea id="request" placeholder="Optional: what do you want to work on? e.g. 'downpicking stamina for Priest gallops'"></textarea>
-        <button id="generate" class="primary" style="margin-top: 8px">Generate 3 exercises</button>
-        <p id="gen-msg" class="muted"></p>
-        <div id="list" class="muted" style="margin-top: 12px"></div>
-      </section>
     </aside>
     <div>
       <div id="current" class="panel" hidden>
@@ -83,8 +76,6 @@ async function load() {
   // one card per built-in drill: its highest unlocked level
   const drills = DRILLS.map(d => [d, exercises.filter(e => e.drill === d.key).sort((a, b) => b.level - a.level)[0]]).filter(([, e]) => e);
   $('drills').innerHTML = drills.map(([d, e]) => card(e, d.name, `Level ${e.level + 1}/${d.levels.length}: ${d.levels[e.level].title}`)).join('');
-  $('list').innerHTML = exercises.filter(e => !e.drill).map(e => card(e, e.title, e.technique)).join('')
-    || 'None yet. Log a practice session on a tab, then generate exercises.';
   if (cur) cur = exercises.find(e => e.id === cur.id) ?? null;
   if (!cur && drills.length) select(drills[0][1].id);
   showCurrent();
@@ -125,22 +116,6 @@ $('delete').onclick = async () => {
   await fetch(`/api/exercises/${cur.id}`, { method: 'DELETE' });
   cur = null;
   load();
-};
-
-$('generate').onclick = async () => {
-  $('generate').disabled = true;
-  $('gen-msg').textContent = 'The tutor is writing exercises… (this can take a minute)';
-  try {
-    const r = await fetch('/api/tutor', { method: 'POST', body: JSON.stringify({ request: $('request').value }) });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error);
-    $('gen-msg').textContent = `Added ${data.created} exercise${data.created === 1 ? '' : 's'}.`;
-    await load();
-  } catch (e) {
-    $('gen-msg').innerHTML = `<span class="error">${esc(e.message)}</span>`;
-  } finally {
-    $('generate').disabled = false;
-  }
 };
 
 // ---------- calendar ----------

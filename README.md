@@ -9,7 +9,7 @@ A small web app for practicing guitar from Guitar Pro tabs:
 - **Fingering optimizer**: suggests easier fingerings, for example keeping a phrase in one hand position instead of jumping around the neck. You review the suggestions bar by bar and accept the ones you like. Accepted changes are stored separately, so your original file is never modified.
 - **Practice**: built-in technique drills, each with a tempo ladder: mark a run "clean" and the tempo goes up 5 bpm, reach the target and the next level unlocks. A calendar shows the days you practiced and your streak.
 - **Practice log**: on any tab, log what you practiced (bars, clean tempo, what felt hard).
-- **Resources**: pick a key (major or natural minor) to see its seven chords as chord boxes, or the scale's notes across the fretboard.
+- **Resources**: pick a root and a scale (major, minor, pentatonics, blues, harmonic minor or a mode) to see the key's chords as chord boxes with their Roman numerals, or the scale across the fretboard as note names or degrees.
 
 Sign in with Google and you get your own private library. Tabs, fingering edits and the practice log are stored in [Supabase](https://supabase.com), so they follow you to any browser.
 

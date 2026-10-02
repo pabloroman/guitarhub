@@ -18,6 +18,7 @@
     <label class="muted">Root <select id="root"></select></label>
     <label class="muted">Scale <select id="scale"></select></label>
     <span class="row" style="margin-left: auto">
+      <button id="degrees" class="toggle" aria-pressed="false">Degrees</button>
       <button class="toggle" data-view="chords">Chords</button>
       <button class="toggle" data-view="fretboard">Fretboard</button>
     </span>
@@ -28,11 +29,15 @@
 <script src="/supabase/supabase.js"></script>
 <script type="module">
 import '/db.js'; // sign-in gate and the Sign out button
-import { NOTES, SCALES, OPEN, scaleNotes, chords } from '/theory.js';
+import { SCALES, OPEN, scale, chords } from '/theory.js';
 
 const $ = id => document.getElementById(id);
 const toggles = document.querySelectorAll('[data-view]');
-let view = 'chords';
+// the key lives in the URL so other pages can link to one
+const params = new URLSearchParams(location.search);
+let root = Math.abs(parseInt(params.get('root')) || 0) % 12;
+let name = Object.hasOwn(SCALES, params.get('scale')) ? params.get('scale') : 'Major';
+let view = 'chords', label = 'name';
 
 // six strings across, five frets down
 function chordBox(frets) {
@@ -48,40 +53,48 @@ function chordBox(frets) {
   </svg>`;
 }
 
-// high E on top like a tab staff, open strings left of the nut
-function fretboard(notes, root) {
+// high E on top like a tab staff, open strings left of the nut; `notes` is the scale, root first
+function fretboard(notes, title) {
   const x = f => f ? 50 + (f - .5) * 60 : 25, y = s => 20 + s * 28;
   const frets = Array.from({ length: 14 }, (_, f) => f), strings = [0, 1, 2, 3, 4, 5];
   const inlay = (f, s) => `<circle cx="${x(f)}" cy="${y(s)}" r="5" fill="var(--muted)" opacity=".35"/>`;
-  return `<svg viewBox="0 0 840 195" role="img" aria-label="${NOTES[root]} scale on the fretboard: ${notes.map(n => NOTES[n]).join(' ')}">
+  return `<svg viewBox="0 0 840 195" role="img" aria-label="${title} on the fretboard: ${notes.map(n => n.name).join(' ')}">
     ${[3, 5, 7, 9].map(f => inlay(f, 2.5)).join('')}${inlay(12, 1.5)}${inlay(12, 3.5)}
     <path stroke="var(--muted)" opacity=".6" d="${strings.map(s => `M8 ${y(s)}H832`).join('')}"/>
     <path stroke="var(--muted)" stroke-width="2" d="${frets.map(f => `M${50 + f * 60} ${y(0)}V${y(5)}`).join('')}"/>
     <path stroke="var(--text)" stroke-width="5" d="M50 ${y(0)}V${y(5)}"/>
     ${strings.flatMap(s => frets.map(f => {
-      const n = (OPEN[5 - s] + f) % 12;
-      return notes.includes(n) ? `<circle cx="${x(f)}" cy="${y(s)}" r="11" fill="var(--${n === root ? 'accent' : 'ok'})"/>
-        <text x="${x(f)}" y="${y(s) + 4}" class="note">${NOTES[n]}</text>` : '';
+      const n = notes.find(n => n.pc === (OPEN[5 - s] + f) % 12);
+      return n ? `<circle cx="${x(f)}" cy="${y(s)}" r="11" fill="var(--${n === notes[0] ? 'accent' : 'ok'})"/>
+        <text x="${x(f)}" y="${y(s) + 4}" class="note">${n[label]}</text>` : '';
     })).join('')}
     ${frets.map(f => `<text x="${x(f)}" y="188">${f}</text>`).join('')}
   </svg>`;
 }
 
 function render() {
-  const root = +$('root').value, scale = $('scale').value, key = `${NOTES[root]} ${scale}`;
+  const notes = scale(root, name), key = `${notes[0].name} ${name}`, list = chords(root, name);
+  history.replaceState(null, '', `?${new URLSearchParams({ root, scale: name })}`);
+  // a root is written differently from scale to scale: Db major, C# minor
+  $('root').innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i}" ${i === root ? 'selected' : ''}>${scale(i, name)[0].name}</option>`).join('');
   for (const b of toggles) b.setAttribute('aria-pressed', b.dataset.view === view);
+  $('degrees').hidden = view === 'chords';
+  $('degrees').setAttribute('aria-pressed', label === 'degree');
   $('title').textContent = view === 'chords' ? `Chords in ${key}` : `Scale on fretboard: ${key}`;
-  $('view').innerHTML = view === 'chords'
-    ? `<div class="chords">${chords(root, scale).map(c => `<div class="panel" role="img" aria-label="${NOTES[c.root]} ${c.quality}: ${c.frets.map(f => f < 0 ? 'x' : f).join(' ')}">
-        <h3>${NOTES[c.root]} <span class="muted">${c.quality}</span></h3>${chordBox(c.frets)}
+  $('view').innerHTML = view === 'fretboard'
+    ? `<div class="panel neck">${fretboard(notes, key)}</div>
+      <p class="row muted" style="justify-content: center; gap: 20px"><span><span style="color: var(--accent)">●</span> Root note</span><span><span style="color: var(--ok)">●</span> Scale note</span></p>`
+    : list.length ? `<div class="chords">${list.map(c => `<div class="panel" role="img" aria-label="${c.numeral}, ${c.name} ${c.quality}: ${c.frets.map(f => f < 0 ? 'x' : f).join(' ')}">
+        <div class="muted">${c.numeral}</div>
+        <h3>${c.name} <span class="muted">${c.quality}</span></h3>${chordBox(c.frets)}
       </div>`).join('')}</div>`
-    : `<div class="panel neck">${fretboard(scaleNotes(root, scale), root)}</div>
-      <p class="row muted" style="justify-content: center; gap: 20px"><span><span style="color: var(--accent)">●</span> Root note</span><span><span style="color: var(--ok)">●</span> Scale note</span></p>`;
+    : `<p class="muted">Chords are built by stacking thirds on a seven-note scale, and ${name} has ${notes.length} notes.</p>`;
 }
 
-$('root').innerHTML = NOTES.map((n, i) => `<option value="${i}">${n}</option>`).join('');
-$('scale').innerHTML = Object.keys(SCALES).map(s => `<option>${s}</option>`).join('');
-$('root').onchange = $('scale').onchange = render;
+$('scale').innerHTML = Object.keys(SCALES).map(s => `<option ${s === name ? 'selected' : ''}>${s}</option>`).join('');
+$('root').onchange = e => { root = +e.target.value; render(); };
+$('scale').onchange = e => { name = e.target.value; render(); };
+$('degrees').onclick = () => { label = label === 'name' ? 'degree' : 'name'; render(); };
 for (const b of toggles) b.onclick = () => { view = b.dataset.view; render(); };
 render();
 </script>

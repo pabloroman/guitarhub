@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as alphaTab from '@coderline/alphatab';
-import { SCALES, CHORD_TYPES, OPEN, TUNINGS, PROGRESSIONS, scale, chord, chords, voicings, positions, scaleTex, chordsTex, guessKey } from './public/theory.js';
+import { SCALES, CHORD_TYPES, OPEN, TUNINGS, PROGRESSIONS, scale, chord, chords, voicings, positions, caged, scaleTex, chordsTex, guessKey } from './public/theory.js';
 
 const names = (root, s) => scale(root, s).map(n => n.name).join(' ');
 const numerals = (root, s) => chords(root, s).map(c => c.numeral).join(' ');
@@ -125,4 +125,31 @@ for (const [tuning, open] of Object.entries(TUNINGS)) test(`${tuning}: chords an
     for (const p of positions(open, scale(root, 'Minor pentatonic'))) fullBars(scaleTex(open, p));
   }
   fullBars(chordsTex(open, chords(0, 'Major', open)));
+});
+
+const boxFrets = box => OPEN.map((_, string) => box.filter(n => n.string === string).map(n => n.fret).join(' ')).join(' | ');
+
+test('CAGED positions are the five textbook shapes', () => {
+  assert.deepEqual(caged(OPEN, scale(7, 'Major')).map(boxFrets), [
+    '2 3 5 | 2 3 5 | 2 4 5 | 2 4 5 | 3 5 | 2 3 5',              // E shape
+    '5 7 8 | 5 7 | 4 5 7 | 4 5 7 | 5 7 8 | 5 7 8',              // D shape
+    '7 8 10 | 7 9 10 | 7 9 10 | 7 9 | 7 8 10 | 7 8 10',         // C shape
+    '10 12 | 9 10 12 | 9 10 12 | 9 11 12 | 10 12 13 | 10 12',   // A shape
+    '0 2 3 | 0 2 3 | 0 2 4 | 0 2 4 | 1 3 | 0 2 3',              // G shape, at the nut around the open G chord
+  ]);
+  assert.equal(boxFrets(caged(OPEN, scale(9, 'Minor'))[0]), '5 7 8 | 5 7 8 | 5 7 | 4 5 7 | 5 6 8 | 5 7 8'); // A minor around the Em-shape chord
+});
+
+for (const s of sevenNote) test(`${s} CAGED positions have no gaps and fit one hand`, () => {
+  for (let root = 0; root < 12; root++) {
+    const notes = scale(root, s), pcs = notes.map(n => n.pc), all = caged(OPEN, notes);
+    assert.equal(all.length, 5, notes[0].name);
+    for (const box of all) {
+      const pitches = box.map(n => OPEN[n.string] + n.fret), frets = box.map(n => n.fret);
+      const between = []; for (let p = pitches[0]; p <= pitches.at(-1); p++) if (pcs.includes(p % 12)) between.push(p);
+      assert.deepEqual(pitches, between, `${notes[0].name}: every scale note from the lowest to the highest, in order`);
+      assert.ok(Math.min(...frets) >= 0 && Math.max(...frets) <= 17 && Math.max(...frets) - Math.min(...frets) <= 5, `${notes[0].name}: ${boxFrets(box)}`);
+      fullBars(scaleTex(OPEN, box));
+    }
+  }
 });

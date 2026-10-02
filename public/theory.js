@@ -72,6 +72,22 @@ export function positions(open, notes, maxFret = 17) {
   }).filter(p => p.every(n => n.fret <= maxFret)); // drop one that runs off the end of the neck
 }
 
+// The five CAGED positions of a scale, in the same form as positions() and in the order E, D, C, A, G shape.
+// The hand stays in a four-fret window that starts on a note of the key's pentatonic on the lowest string, and the
+// first finger reaches back one fret where the scale needs it. A window at the nut starts at fret 1 and reaches the open strings.
+export function caged(open, notes, maxFret = 17) {
+  const pcs = notes.map(n => n.pc), minor = notes.some(n => n.degree === 'b3');
+  return scale(notes[0].pc, minor ? 'Minor pentatonic' : 'Major pentatonic').map(anchor => {
+    const first = (anchor.pc - open[0] % 12 + 12) % 12 || 1, out = [];
+    let pitch = open[0] + first - 1;
+    open.forEach((o, string) => {
+      // every scale note up to the end of the window; the next one starts the following string
+      for (; pitch - o <= first + 3; pitch++) if (pcs.includes(pitch % 12)) out.push({ string, fret: pitch - o });
+    });
+    return out.some(n => n.fret < 0) ? out.map(n => ({ ...n, fret: n.fret + 12 })) : out;
+  }).filter(p => p.every(n => n.fret <= maxFret));
+}
+
 // a pitch class under both its names where it has two: "C#/Db"
 export const pitchClassName = pc => SHARP[pc] === FLAT[pc] ? SHARP[pc] : `${SHARP[pc]}/${FLAT[pc]}`;
 // "Drop D", or the open strings' notes for a tuning without a name ("C G C F A D")

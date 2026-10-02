@@ -58,9 +58,13 @@
   <div class="panel">
     <div class="row" style="margin-bottom: 8px">
       <button id="prev" class="icon" aria-label="Previous position">‹</button>
-      <span id="pos" role="status" style="min-width: 13ch; text-align: center"></span>
+      <span id="pos" role="status" style="min-width: 17ch; text-align: center"></span>
       <button id="next" class="icon" aria-label="Next position">›</button>
       <button id="all" class="toggle">Whole neck</button>
+      <select id="system" aria-label="How the scale is split into positions">
+        <option value="caged">CAGED positions</option>
+        <option value="nps">3 notes per string</option>
+      </select>
       <button id="play" disabled>Play scale</button>
       <button id="degrees" class="toggle" style="margin-left: auto">Degrees</button>
     </div>
@@ -84,7 +88,7 @@
 <script type="module">
 import { db } from '/db.js';
 import { alphaTab, createPlayer } from '/player.js';
-import { SCALES, CHORD_TYPES, OPEN, TUNINGS, PROGRESSIONS, scale, chord, chords, voicings, positions, scaleTex, chordsTex, tuningName, pitchClassName } from '/theory.js';
+import { SCALES, CHORD_TYPES, OPEN, TUNINGS, PROGRESSIONS, scale, chord, chords, voicings, positions, caged, scaleTex, chordsTex, tuningName, pitchClassName } from '/theory.js';
 
 const $ = id => document.getElementById(id);
 const isMinor = notes => notes.some(n => n.degree === 'b3'); // which ring of the circle of fifths a scale belongs to
@@ -107,15 +111,20 @@ let tuning = Object.values(TUNINGS).find(t => t.join() === linked.join())
 const tunings = [...new Set([...Object.values(TUNINGS), tuning])];
 let label = 'name', pos = null, picked = null; // pos and picked index the scale's positions and chords; null is "all"
 let prog = null; // index of the progression in the player; null is the scale
+let system = 'caged';
+// A seven-note scale splits into positions two ways; pentatonics and blues only have their boxes.
+const boxesFor = notes => notes.length === 7 && system === 'caged' ? caged(tuning, notes, FRETS) : positions(tuning, notes, FRETS);
 
 // The player shows the current position, or the chosen progression. Loading takes a moment, so "play" may have to wait for it.
-let loaded = '', loading = false, autoplay = false;
+let loaded = '', loading = false, autoplay = false, loadTimer;
 function load(tex) {
   if (tex === loaded) return;
   loaded = tex; loading = true;
   $('practise-msg').textContent = '';
   api.stop();
-  api.tex(tex);
+  // wait for a pause: stepping quickly through positions would reload the player while it is still drawing the last one
+  clearTimeout(loadTimer);
+  loadTimer = setTimeout(() => api.tex(tex), 150);
 }
 const play = () => { if (loading) autoplay = true; else api.play(); };
 api.playerReady.on(() => { loading = false; $('play').disabled = false; if (autoplay) { autoplay = false; api.play(); } });
@@ -139,7 +148,7 @@ function chordBox(frets) {
 }
 
 // The highest string on top like a tab staff, open strings left of the nut.
-// dot(string, fret) says what sits there, if anything: { text, root, dim, color }; string 0 is the lowest of `count`.
+// dot(string, fret) says what sits there, if anything: { text, root, dim, ring, color }; string 0 is the lowest of `count`.
 // With `hit`, every place on the neck is also a button carrying data-string and data-fret.
 function fretboard(title, count, dot, last = FRETS, hit = false) {
   const x = f => f ? 50 + (f - .5) * 60 : 25, y = s => 20 + s * 28, mid = (count - 1) / 2;
@@ -152,7 +161,7 @@ function fretboard(title, count, dot, last = FRETS, hit = false) {
     <path stroke="var(--text)" stroke-width="5" d="M50 ${y(0)}V${y(count - 1)}"/>
     ${strings.flatMap(s => frets.map(f => {
       const d = dot(count - 1 - s, f);
-      return (d ? `<g opacity="${d.dim ? .22 : 1}"><circle cx="${x(f)}" cy="${y(s)}" r="11" fill="var(--${d.color ?? (d.root ? 'accent' : 'ok')})"/>
+      return (d ? `<g opacity="${d.dim ? .22 : 1}"><circle cx="${x(f)}" cy="${y(s)}" r="11" fill="var(--${d.color ?? (d.root ? 'accent' : 'ok')})" ${d.ring ? 'stroke="var(--text)" stroke-width="3"' : ''}/>
         <text x="${x(f)}" y="${y(s) + 4}" class="note">${d.text}</text></g>` : '')
         + (hit ? `<circle class="hit" cx="${x(f)}" cy="${y(s)}" r="13" data-string="${count - 1 - s}" data-fret="${f}" role="button" tabindex="0" aria-label="String ${s + 1}, fret ${f}"/>` : '');
     })).join('')}
@@ -249,9 +258,15 @@ $('answers').onclick = e => {
 };
 
 function render() {
-  const notes = scale(root, name), key = `${notes[0].name} ${name}`, list = chords(root, name, tuning), boxes = positions(tuning, notes, FRETS);
+  const notes = scale(root, name), key = `${notes[0].name} ${name}`, list = chords(root, name, tuning), boxes = boxesFor(notes);
   if (pos >= boxes.length) pos = null;
   const box = boxes[pos], pickedChord = list[picked]; // undefined when showing everything
+  // In standard tuning the five positions (CAGED, or a pentatonic's boxes) each sit around one open-chord shape of the
+  // tonic chord moved up the neck: E, D, C, A, G. Its notes are ringed, so the chord shows through the scale.
+  const shaped = tuning === OPEN && boxes.length === 5 && (notes.length !== 7 || system === 'caged');
+  const shape = `${'EDCAG'[pos ?? 0]}${isMinor(notes) ? 'm' : ''} shape`, tonicSymbol = list[0]?.symbol ?? notes[0].name + (isMinor(notes) ? 'm' : '');
+  const fifth = notes.find(n => n.degree === '5') ?? notes.find(n => n.degree.endsWith('5'));
+  const tonic = notes.filter(n => ['1', '3', 'b3'].includes(n.degree) || n === fifth), ringed = shaped && box && !pickedChord;
   // progressions for keys whose tonic chord is major, or minor; none for scales without chords
   const sets = list.length ? PROGRESSIONS[list[0].quality === 'Major' ? 'Major' : 'Minor'] : [];
   const progName = p => p.name ?? p.degrees.map(i => list[i].numeral).join(' – ');
@@ -272,19 +287,21 @@ function render() {
   $('circle').innerHTML = circle(isMinor(notes));
 
   $('neck-title').textContent = pickedChord ? `${pickedChord.name} ${pickedChord.quality} in ${key}` : key;
-  $('pos').textContent = box ? `Position ${pos + 1} of ${boxes.length}` : 'All positions';
+  $('pos').textContent = !box ? 'All positions' : shaped ? `${shape} · ${pos + 1} of 5` : `Position ${pos + 1} of ${boxes.length}`;
+  $('system').hidden = notes.length !== 7;
   $('all').setAttribute('aria-pressed', !box);
   $('degrees').setAttribute('aria-pressed', label === 'degree');
   $('neck').innerHTML = fretboard(`${$('neck-title').textContent} on the fretboard: ${(pickedChord ? notes.filter(n => pickedChord.notes.includes(n.pc)) : notes).map(n => n.name).join(' ')}`, tuning.length, (string, fret) => {
     const n = notes.find(n => n.pc === (tuning[string] + fret) % 12);
     if (!n) return;
     const tone = pickedChord && TONE[(n.pc - pickedChord.root + 12) % 12];
-    return { root: n.pc === (pickedChord ? pickedChord.root : root), text: label === 'name' ? n.name : pickedChord ? tone ?? '' : n.degree,
-      dim: (pickedChord && !pickedChord.notes.includes(n.pc)) || (box && !box.some(b => b.string === string && b.fret === fret)) };
+    const dim = (pickedChord && !pickedChord.notes.includes(n.pc)) || (box && !box.some(b => b.string === string && b.fret === fret));
+    return { dim, ring: ringed && !dim && tonic.includes(n), root: n.pc === (pickedChord ? pickedChord.root : root),
+      text: label === 'name' ? n.name : pickedChord ? tone ?? '' : n.degree };
   });
   // on a narrow screen the neck scrolls sideways: bring the position into view
   if (box) $('neck').scrollLeft = (Math.min(...box.map(b => b.fret)) * 60 - 20) / (60 + FRETS * 60) * $('neck').scrollWidth;
-  $('legend').innerHTML =`<span><span style="color: var(--accent)">●</span> ${pickedChord ? 'Chord root' : 'Root note'}</span><span><span style="color: var(--ok)">●</span> ${pickedChord ? 'Chord note' : 'Scale note'}</span>`;
+  $('legend').innerHTML =`<span><span style="color: var(--accent)">●</span> ${pickedChord ? 'Chord root' : 'Root note'}</span><span><span style="color: var(--ok)">●</span> ${pickedChord ? 'Chord note' : 'Scale note'}</span>${ringed ? `<span>◯ ${tonicSymbol} chord, ${shape}</span>` : ''}`;
 
   $('chords-title').textContent = `Chords in ${key}`;
   $('chords').innerHTML = list.length ? `<div class="chords">${list.map((c, i) => `<button class="card" data-chord="${i}" aria-pressed="${i === picked}" aria-label="${c.numeral}, ${c.name} ${c.quality}: ${text(c.frets)}">
@@ -295,7 +312,7 @@ function render() {
     <div class="row">${sets.map((p, i) => `<button class="toggle" data-prog="${i}" aria-pressed="${i === prog}">${progName(p)}</button>`).join('')}</div>`
     : `<p class="muted">Chords are built by stacking thirds on a seven-note scale, and ${name} has ${notes.length} notes.</p>`;
 
-  $('tab-title').textContent = sets[prog] ? `${progName(sets[prog])} in ${key}` : `${key}, position ${(pos ?? 0) + 1}`;
+  $('tab-title').textContent = sets[prog] ? `${progName(sets[prog])} in ${key}` : `${key}, ${shaped ? shape : `position ${(pos ?? 0) + 1}`}`;
   renderTrainer();
   playLabel();
   load(sets[prog] ? chordsTex(tuning, sets[prog].degrees.map(i => list[i])) : scaleTex(tuning, box ?? boxes[0]));
@@ -316,7 +333,8 @@ $('play').onclick = () => {
 };
 $('degrees').onclick = () => { label = label === 'name' ? 'degree' : 'name'; render(); };
 $('all').onclick = () => { pos = null; render(); };
-const step = by => () => { const n = positions(tuning, scale(root, name), FRETS).length; pos = pos === null ? (by > 0 ? 0 : n - 1) : (pos + by + n) % n; render(); };
+$('system').onchange = e => { system = e.target.value; render(); };
+const step = by => () => { const n = boxesFor(scale(root, name)).length; pos = pos === null ? (by > 0 ? 0 : n - 1) : (pos + by + n) % n; render(); };
 $('prev').onclick = step(-1);
 $('next').onclick = step(1);
 // a wedge sets the root; the scale only changes when you cross between the major and minor rings (A minor pentatonic -> E minor pentatonic)
@@ -333,11 +351,11 @@ $('circle').onclick = $('circle').onkeydown = pickKey;
 
 // what the player is showing becomes a drill on the Practice page, with the same tempo ladder as the built-in ones
 $('practise').onclick = async () => {
-  const scaleRun = prog === null;
+  const scaleRun = prog === null, kind = scale(root, name).length === 7 && system === 'caged' ? 'caged' : 'position';
   const { error } = await db.from('exercises').upsert({
     title: $('tab-title').textContent, technique: scaleRun ? 'Scale' : 'Chord changes', alphatex: loaded,
     goal: scaleRun ? 'Even 8th notes up and back down, every note the same length and volume.' : 'Change chords in time without stopping the strumming hand.',
-    start_bpm: 60, target_bpm: 120, current_bpm: 60, drill: `resources:${root}:${name}:${scaleRun ? `position${pos ?? 0}` : `progression${prog}`}${tuning === OPEN ? '' : `:${tuning}`}`, level: 0,
+    start_bpm: 60, target_bpm: 120, current_bpm: 60, drill: `resources:${root}:${name}:${scaleRun ? `${kind}${pos ?? 0}` : `progression${prog}`}${tuning === OPEN ? '' : `:${tuning}`}`, level: 0,
   }, { onConflict: 'user_id,drill,level', ignoreDuplicates: true }); // adding it twice keeps the first one and its progress
   $('practise-msg').innerHTML = error ? `<span class="error">Could not add it: ${esc(error.message)}</span>` : 'It\'s in your drills. <a href="/practice.html">Open Practice →</a>';
 };

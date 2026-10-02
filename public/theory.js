@@ -1,5 +1,10 @@
 // Pitch classes are 0-11 from C. Strings run low to high, like optimizer.js.
 export const OPEN = [40, 45, 50, 55, 59, 64];
+export const TUNINGS = {
+  Standard: OPEN, 'Eb standard': [39, 44, 49, 54, 58, 63], 'D standard': [38, 43, 48, 53, 57, 62],
+  'Drop D': [38, 45, 50, 55, 59, 64], 'Drop C': [36, 43, 48, 53, 57, 62],
+  DADGAD: [38, 45, 50, 55, 57, 62], 'Open G': [38, 43, 50, 55, 59, 62], 'Open D': [38, 45, 50, 54, 57, 62],
+};
 // Scales as degrees of the major scale, so notes can be spelled for their key (Bb, not A#) and labelled (b3).
 export const SCALES = {
   Major: '1 2 3 4 5 6 7', Minor: '1 2 b3 4 5 b6 b7',
@@ -67,6 +72,9 @@ export function positions(open, notes, maxFret = 17) {
   }).filter(p => p.every(n => n.fret <= maxFret)); // drop one that runs off the end of the neck
 }
 
+// "Drop D", or the open strings' notes for a tuning without a name ("C G C F A D")
+export const tuningName = open => Object.keys(TUNINGS).find(t => TUNINGS[t].join() === open.join()) ?? open.map(m => SHARP[m % 12]).join(' ');
+
 const X = -1; // muted string
 // the open chords that aren't a barre shape slid down to the nut, keyed by root + quality
 const OPEN_SHAPES = { '0Major': [X, 3, 2, 0, 1, 0], '2Major': [X, X, 0, 2, 3, 2], '7Major': [3, 2, 0, 0, 0, 3], '2Minor': [X, X, 0, 2, 3, 1] };
@@ -114,6 +122,11 @@ function search(open, root, type) {
   }
   return [...best.values()];
 }
+// the standard shape in standard tuning; in any other, the easiest voicing the search finds, leaning towards the nut
+// (all strings muted if it finds none)
+const nearNut = v => v.cost + v.low * .75;
+const triad = (open, root, quality) => open.join() === OPEN.join() ? shape(root, quality)
+  : search(open, root, quality).sort((a, b) => nearNut(a) - nearNut(b))[0]?.frets ?? open.map(() => X);
 // the six easiest, from the nut upwards
 export const voicings = (open, root, type) => search(open, root, type).sort((a, b) => a.cost - b.cost).slice(0, 6).sort((a, b) => a.low - b.low).map(v => v.frets);
 
@@ -121,14 +134,14 @@ const QUALITY = { '4,7': 'Major', '3,7': 'Minor', '3,6': 'Diminished', '4,8': 'A
 const NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
 
 // the triad on each degree of a seven-note scale; other scales don't stack into thirds, so they get none
-export function chords(root, name) {
+export function chords(root, name, open = OPEN) {
   const s = scale(root, name);
   if (s.length !== 7) return [];
   return s.map((r, i) => {
     const notes = [r, s[(i + 2) % 7], s[(i + 4) % 7]].map(n => n.pc);
     const quality = QUALITY[notes.slice(1).map(n => (n - r.pc + 12) % 12)];
     const numeral = quality === 'Major' || quality === 'Augmented' ? NUMERALS[i] : NUMERALS[i].toLowerCase();
-    return { root: r.pc, name: r.name, quality, notes, frets: shape(r.pc, quality), symbol: r.name + CHORD_TYPES[quality].symbol,
+    return { root: r.pc, name: r.name, quality, notes, frets: triad(open, r.pc, quality), symbol: r.name + CHORD_TYPES[quality].symbol,
       numeral: r.degree.slice(0, -1) + numeral + ({ Diminished: '°', Augmented: '+' }[quality] ?? '') };
   });
 }
@@ -148,7 +161,7 @@ export function scaleTex(open, position) {
 
 // one bar per chord ({ frets, symbol }), strummed 1, 2 or 4 times, with the chord's symbol above it
 export const chordsTex = (open, chords, strums = 4) => `\\tempo 90\n${tabTex(open, chords.map(c => {
-  const beat = `(${c.frets.flatMap((f, s) => f < 0 ? [] : `${f}.${open.length - s}`).join(' ')})`;
+  const notes = c.frets.flatMap((f, s) => f < 0 ? [] : `${f}.${open.length - s}`), beat = notes.length ? `(${notes.join(' ')})` : 'r';
   return `:${strums} ${beat}{ch "${c.symbol}"} ${`${beat} `.repeat(strums - 1)}|`;
 }).join(' '))}`;
 
@@ -158,3 +171,27 @@ export const PROGRESSIONS = {
   Major: [{ degrees: [0, 4, 5, 3] }, { degrees: [0, 3, 4] }, { degrees: [1, 4, 0] }, BLUES],
   Minor: [{ degrees: [0, 5, 2, 6] }, { degrees: [0, 3, 4] }, { degrees: [0, 6, 5, 4] }, BLUES],
 };
+
+// ---------- key of a piece ----------
+
+// How strongly each degree is heard as belonging to a major or minor key (Krumhansl & Kessler's probe-tone profiles), tonic first.
+const PROFILE = {
+  Major: [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
+  Minor: [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
+};
+const correlation = (a, b) => {
+  const mean = v => v.reduce((t, x) => t + x, 0) / v.length, ma = mean(a), mb = mean(b);
+  const dot = (u, mu, v, mv) => u.reduce((t, x, i) => t + (x - mu) * (v[i] - mv), 0);
+  return dot(a, ma, b, mb) / Math.sqrt(dot(a, ma, a, ma) * dot(b, mb, b, mb));
+};
+// The key whose profile best matches how long each pitch class sounds in a piece: weights[pc] -> { root, scale }.
+// ponytail: major or minor only, so a modal riff (E Phrygian) comes back as its nearest relative (A minor or C major),
+// and one key for the whole piece. Add mode profiles, or a guess per section, if that turns out to matter.
+export function guessKey(weights) {
+  let best;
+  for (const scale in PROFILE) for (let root = 0; root < 12; root++) {
+    const fit = correlation(weights.map((_, i) => weights[(i + root) % 12]), PROFILE[scale]);
+    if (!(best?.fit >= fit)) best = { root, scale, fit };
+  }
+  return best;
+}

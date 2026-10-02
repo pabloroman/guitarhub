@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as alphaTab from '@coderline/alphatab';
-import { SCALES, CHORD_TYPES, OPEN, PROGRESSIONS, scale, chord, chords, shape, voicings, positions, scaleTex, chordsTex } from './public/theory.js';
+import { SCALES, CHORD_TYPES, OPEN, TUNINGS, PROGRESSIONS, scale, chord, chords, voicings, positions, scaleTex, chordsTex, guessKey } from './public/theory.js';
 
 const names = (root, s) => scale(root, s).map(n => n.name).join(' ');
 const numerals = (root, s) => chords(root, s).map(c => c.numeral).join(' ');
@@ -101,4 +101,28 @@ for (const type in CHORD_TYPES) test(`${type} voicings are playable on every roo
       assert.ok(Math.max(...fretted) - Math.min(...fretted) <= 3, `${text(frets)} fits one hand`);
     }
   }
+});
+
+test('the key of a piece is guessed from how long each note sounds', () => {
+  const weigh = notes => { const w = Array(12).fill(0); for (const [pc, beats] of notes) w[pc] += beats; return w; };
+  // "Twinkle twinkle" in C, then a line that sits on A, C and E with a G# leading note
+  assert.deepEqual(guessKey(weigh([[0, 4], [7, 4], [9, 2], [5, 2], [4, 2], [2, 2], [0, 4]])), { root: 0, scale: 'Major', fit: guessKey(weigh([[0, 4], [7, 4], [9, 2], [5, 2], [4, 2], [2, 2], [0, 4]])).fit });
+  const minor = guessKey(weigh([[9, 6], [0, 3], [4, 4], [11, 1], [2, 2], [8, 1], [5, 1]]));
+  assert.equal(`${minor.root} ${minor.scale}`, '9 Minor');
+});
+
+for (const [tuning, open] of Object.entries(TUNINGS)) test(`${tuning}: chords and voicings still sound the right notes`, () => {
+  const pcs = frets => frets.flatMap((f, i) => f < 0 ? [] : (open[i] + f) % 12);
+  for (let root = 0; root < 12; root++) {
+    for (const c of chords(root, 'Major', open)) {
+      assert.deepEqual([...new Set(pcs(c.frets))].sort(), [...c.notes].sort(), `${c.symbol} ${text(c.frets)}`);
+      assert.equal(pcs(c.frets)[0], c.root, `${c.symbol} ${text(c.frets)} has its root in the bass`);
+    }
+    for (const type of ['Minor', 'Dominant 7th']) for (const frets of voicings(open, root, type)) {
+      const tones = chord(root, type).map(n => n.pc);
+      assert.ok(pcs(frets)[0] === root && pcs(frets).every(pc => tones.includes(pc)), `${type} ${text(frets)}`);
+    }
+    for (const p of positions(open, scale(root, 'Minor pentatonic'))) fullBars(scaleTex(open, p));
+  }
+  fullBars(chordsTex(open, chords(0, 'Major', open)));
 });

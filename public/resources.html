@@ -16,6 +16,7 @@
   <div class="row" style="margin: 12px 0 16px">
     <button class="toggle" data-tab="keys">Keys and scales</button>
     <button class="toggle" data-tab="finder">Chord finder</button>
+    <label class="muted" style="margin-left: auto">Tuning <select id="tuning"></select></label>
   </div>
   <section id="finder" hidden>
     <p class="muted" style="margin-top: 0">Pick a chord to see ways to play it, from the nut up the neck. Click one to hear it.</p>
@@ -67,7 +68,7 @@
 <script type="module">
 import { db } from '/db.js';
 import { alphaTab, createPlayer } from '/player.js';
-import { SCALES, CHORD_TYPES, OPEN, PROGRESSIONS, scale, chord, chords, voicings, positions, scaleTex, chordsTex } from '/theory.js';
+import { SCALES, CHORD_TYPES, OPEN, TUNINGS, PROGRESSIONS, scale, chord, chords, voicings, positions, scaleTex, chordsTex, tuningName } from '/theory.js';
 
 const $ = id => document.getElementById(id);
 const isMinor = notes => notes.some(n => n.degree === 'b3'); // which ring of the circle of fifths a scale belongs to
@@ -82,6 +83,11 @@ let tab = params.get('tab') === 'finder' ? 'finder' : 'keys';
 let root = Math.abs(parseInt(params.get('root')) || 0) % 12;
 let name = Object.hasOwn(SCALES, params.get('scale')) ? params.get('scale') : 'Major';
 let type = Object.hasOwn(CHORD_TYPES, params.get('type')) ? params.get('type') : 'Major';
+// the open strings as MIDI notes, lowest first; a tab links here with its own, which may have no name or more strings
+const linked = (params.get('tuning') ?? '').split(',').map(Number);
+let tuning = Object.values(TUNINGS).find(t => t.join() === linked.join())
+  ?? (linked.length >= 4 && linked.length <= 8 && linked.every(m => Number.isInteger(m) && m >= 12 && m <= 84) ? linked : OPEN);
+const tunings = [...new Set([...Object.values(TUNINGS), tuning])];
 let label = 'name', pos = null, picked = null; // pos and picked index the scale's positions and chords; null is "all"
 let prog = null; // index of the progression in the player; null is the scale
 
@@ -97,41 +103,41 @@ function load(tex) {
 const play = () => { if (loading) autoplay = true; else api.play(); };
 api.playerReady.on(() => { loading = false; $('play').disabled = false; if (autoplay) { autoplay = false; api.play(); } });
 // a one-chord tab ({ frets, symbol }) that is never shown, only played; not while something else is playing
-const strum = chord => { if (api.playerState !== 1) api.playBeat(alphaTab.importer.ScoreLoader.loadAlphaTex(chordsTex(OPEN, [chord], 1)).tracks[0].staves[0].bars[0].voices[0].beats[0]); };
+const strum = chord => { if (api.playerState !== 1) api.playBeat(alphaTab.importer.ScoreLoader.loadAlphaTex(chordsTex(tuning, [chord], 1)).tracks[0].staves[0].bars[0].voices[0].beats[0]); };
 const playLabel = () => { $('play').textContent = api.playerState === 1 && prog === null ? 'Pause' : 'Play scale'; };
 api.playerStateChanged.on(playLabel);
 
-// six strings across, five frets down
+// one line per string across, five frets down
 function chordBox(frets) {
   const fretted = frets.filter(f => f > 0);
   // a shape that doesn't fit in the first five frets is drawn from its lowest fret, labelled instead of a nut
   const base = Math.max(...fretted) <= 5 ? 1 : Math.min(...fretted);
-  const x = i => 20 + i * 14, y = j => 24 + j * 18;
-  return `<svg viewBox="-8 0 126 120" width="170" fill="currentColor">
-    <path stroke="currentColor" opacity=".45" d="${[0, 1, 2, 3, 4, 5].map(i => `M${x(i)} ${y(0)}V${y(5)}M${x(0)} ${y(i)}H${x(5)}`).join('')}"/>
-    ${base === 1 ? `<path stroke="currentColor" stroke-width="3" d="M${x(0) - .5} ${y(0)}H${x(5) + .5}"/>` : `<text x="99" y="${y(.5) + 3}" style="text-anchor: start">${base}fr</text>`}
+  const x = i => 20 + i * 14, y = j => 24 + j * 18, right = x(frets.length - 1);
+  return `<svg viewBox="-8 0 ${right + 36} 120" width="${Math.round((right + 36) * 1.35)}" fill="currentColor">
+    <path stroke="currentColor" opacity=".45" d="${frets.map((_, i) => `M${x(i)} ${y(0)}V${y(5)}`).join('')}${[0, 1, 2, 3, 4, 5].map(j => `M${x(0)} ${y(j)}H${right}`).join('')}"/>
+    ${base === 1 ? `<path stroke="currentColor" stroke-width="3" d="M${x(0) - .5} ${y(0)}H${right + .5}"/>` : `<text x="${right + 9}" y="${y(.5) + 3}" style="text-anchor: start">${base}fr</text>`}
     ${frets.map((f, i) => f > 0 ? `<circle cx="${x(i)}" cy="${y(f - base + .5)}" r="5.5"/>`
       : `<text x="${x(i)}" y="16" class="${f ? 'error' : ''}">${f ? 'x' : 'o'}</text>`).join('')}
   </svg>`;
 }
 
-// High E on top like a tab staff, open strings left of the nut.
-// dot(string, fret) says what sits there, if anything: { text, root, dim }; string 0 is the lowest.
-function fretboard(title, dot) {
-  const x = f => f ? 50 + (f - .5) * 60 : 25, y = s => 20 + s * 28;
-  const frets = Array.from({ length: FRETS + 1 }, (_, f) => f), strings = [0, 1, 2, 3, 4, 5];
+// The highest string on top like a tab staff, open strings left of the nut.
+// dot(string, fret) says what sits there, if anything: { text, root, dim }; string 0 is the lowest of `count`.
+function fretboard(title, count, dot) {
+  const x = f => f ? 50 + (f - .5) * 60 : 25, y = s => 20 + s * 28, mid = (count - 1) / 2;
+  const frets = Array.from({ length: FRETS + 1 }, (_, f) => f), strings = Array.from({ length: count }, (_, s) => s);
   const inlay = (f, s) => `<circle cx="${x(f)}" cy="${y(s)}" r="5" fill="var(--muted)" opacity=".35"/>`;
-  return `<svg viewBox="0 0 ${60 + FRETS * 60} 195" role="img" aria-label="${title}">
-    ${[3, 5, 7, 9, 15, 17].map(f => inlay(f, 2.5)).join('')}${inlay(12, 1.5)}${inlay(12, 3.5)}
+  return `<svg viewBox="0 0 ${60 + FRETS * 60} ${y(count - 1) + 35}" role="img" aria-label="${title}">
+    ${[3, 5, 7, 9, 15, 17].map(f => inlay(f, mid)).join('')}${inlay(12, mid - 1)}${inlay(12, mid + 1)}
     <path stroke="var(--muted)" opacity=".6" d="${strings.map(s => `M8 ${y(s)}H${52 + FRETS * 60}`).join('')}"/>
-    <path stroke="var(--muted)" stroke-width="2" d="${frets.map(f => `M${50 + f * 60} ${y(0)}V${y(5)}`).join('')}"/>
-    <path stroke="var(--text)" stroke-width="5" d="M50 ${y(0)}V${y(5)}"/>
+    <path stroke="var(--muted)" stroke-width="2" d="${frets.map(f => `M${50 + f * 60} ${y(0)}V${y(count - 1)}`).join('')}"/>
+    <path stroke="var(--text)" stroke-width="5" d="M50 ${y(0)}V${y(count - 1)}"/>
     ${strings.flatMap(s => frets.map(f => {
-      const d = dot(5 - s, f);
+      const d = dot(count - 1 - s, f);
       return d ? `<g opacity="${d.dim ? .22 : 1}"><circle cx="${x(f)}" cy="${y(s)}" r="11" fill="var(--${d.root ? 'accent' : 'ok'})"/>
         <text x="${x(f)}" y="${y(s) + 4}" class="note">${d.text}</text></g>` : '';
     })).join('')}
-    ${frets.map(f => `<text x="${x(f)}" y="188">${f}</text>`).join('')}
+    ${frets.map(f => `<text x="${x(f)}" y="${y(count - 1) + 28}">${f}</text>`).join('')}
   </svg>`;
 }
 
@@ -150,13 +156,13 @@ function circle(minor) {
 }
 
 function render() {
-  const notes = scale(root, name), key = `${notes[0].name} ${name}`, list = chords(root, name), boxes = positions(OPEN, notes, FRETS);
+  const notes = scale(root, name), key = `${notes[0].name} ${name}`, list = chords(root, name, tuning), boxes = positions(tuning, notes, FRETS);
   if (pos >= boxes.length) pos = null;
   const box = boxes[pos], pickedChord = list[picked]; // undefined when showing everything
   // progressions for keys whose tonic chord is major, or minor; none for scales without chords
   const sets = list.length ? PROGRESSIONS[list[0].quality === 'Major' ? 'Major' : 'Minor'] : [];
   const progName = p => p.name ?? p.degrees.map(i => list[i].numeral).join(' – ');
-  history.replaceState(null, '', `?${new URLSearchParams(tab === 'finder' ? { tab, root, type } : { root, scale: name })}`);
+  history.replaceState(null, '', `?${new URLSearchParams({ ...(tab === 'finder' ? { tab, root, type } : { root, scale: name }), ...(tuning !== OPEN && { tuning }) })}`);
   for (const b of document.querySelectorAll('[data-tab]')) b.setAttribute('aria-pressed', b.dataset.tab === tab);
   $('keys').hidden = tab !== 'keys';
   $('finder').hidden = tab !== 'finder';
@@ -164,7 +170,7 @@ function render() {
   const tones = chord(root, type), symbol = tones[0].name + CHORD_TYPES[type].symbol, text = frets => frets.map(f => f < 0 ? 'x' : f).join(' ');
   $('chord-root').innerHTML = Array.from({ length: 12 }, (_, i) => `<option value="${i}" ${i === root ? 'selected' : ''}>${chord(i, type)[0].name}</option>`).join('');
   $('finder-title').textContent = `${symbol} · ${tones.map(n => n.name).join(' ')}`;
-  $('voicings').innerHTML = voicings(OPEN, root, type).map(frets => `<button class="card" data-frets="${frets}" data-symbol="${symbol}" aria-label="${symbol}: ${text(frets)}">
+  $('voicings').innerHTML = voicings(tuning, root, type).map(frets => `<button class="card" data-frets="${frets}" data-symbol="${symbol}" aria-label="${symbol}: ${text(frets)}">
       ${chordBox(frets)}<span class="muted">${text(frets)}</span>
     </button>`).join('');
 
@@ -177,8 +183,8 @@ function render() {
   $('pos').textContent = box ? `Position ${pos + 1} of ${boxes.length}` : 'All positions';
   $('all').setAttribute('aria-pressed', !box);
   $('degrees').setAttribute('aria-pressed', label === 'degree');
-  $('neck').innerHTML = fretboard(`${$('neck-title').textContent} on the fretboard: ${(pickedChord ? notes.filter(n => pickedChord.notes.includes(n.pc)) : notes).map(n => n.name).join(' ')}`, (string, fret) => {
-    const n = notes.find(n => n.pc === (OPEN[string] + fret) % 12);
+  $('neck').innerHTML = fretboard(`${$('neck-title').textContent} on the fretboard: ${(pickedChord ? notes.filter(n => pickedChord.notes.includes(n.pc)) : notes).map(n => n.name).join(' ')}`, tuning.length, (string, fret) => {
+    const n = notes.find(n => n.pc === (tuning[string] + fret) % 12);
     if (!n) return;
     const tone = pickedChord && TONE[(n.pc - pickedChord.root + 12) % 12];
     return { root: n.pc === (pickedChord ? pickedChord.root : root), text: label === 'name' ? n.name : pickedChord ? tone ?? '' : n.degree,
@@ -199,12 +205,14 @@ function render() {
 
   $('tab-title').textContent = sets[prog] ? `${progName(sets[prog])} in ${key}` : `${key}, position ${(pos ?? 0) + 1}`;
   playLabel();
-  load(sets[prog] ? chordsTex(OPEN, sets[prog].degrees.map(i => list[i])) : scaleTex(OPEN, box ?? boxes[0]));
+  load(sets[prog] ? chordsTex(tuning, sets[prog].degrees.map(i => list[i])) : scaleTex(tuning, box ?? boxes[0]));
 }
 
 $('scale').innerHTML = Object.keys(SCALES).map(s => `<option ${s === name ? 'selected' : ''}>${s}</option>`).join('');
 $('chord-type').innerHTML = Object.keys(CHORD_TYPES).map(t => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('');
 for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => { tab = b.dataset.tab; render(); };
+$('tuning').innerHTML = tunings.map(t => `<option ${t === tuning ? 'selected' : ''}>${tuningName(t)}</option>`).join('');
+$('tuning').onchange = e => { tuning = tunings[e.target.selectedIndex]; picked = null; render(); };
 $('chord-type').onchange = e => { type = e.target.value; render(); };
 $('voicings').onclick = e => { const v = e.target.closest('[data-frets]'); if (v) strum({ frets: v.dataset.frets.split(',').map(Number), symbol: v.dataset.symbol }); };
 $('root').onchange = $('chord-root').onchange = e => { root = +e.target.value; picked = null; render(); };
@@ -215,7 +223,7 @@ $('play').onclick = () => {
 };
 $('degrees').onclick = () => { label = label === 'name' ? 'degree' : 'name'; render(); };
 $('all').onclick = () => { pos = null; render(); };
-const step = by => () => { const n = positions(OPEN, scale(root, name), FRETS).length; pos = pos === null ? (by > 0 ? 0 : n - 1) : (pos + by + n) % n; render(); };
+const step = by => () => { const n = positions(tuning, scale(root, name), FRETS).length; pos = pos === null ? (by > 0 ? 0 : n - 1) : (pos + by + n) % n; render(); };
 $('prev').onclick = step(-1);
 $('next').onclick = step(1);
 // a wedge sets the root; the scale only changes when you cross between the major and minor rings (A minor pentatonic -> E minor pentatonic)
@@ -236,7 +244,7 @@ $('practise').onclick = async () => {
   const { error } = await db.from('exercises').upsert({
     title: $('tab-title').textContent, technique: scaleRun ? 'Scale' : 'Chord changes', alphatex: loaded,
     goal: scaleRun ? 'Even 8th notes up and back down, every note the same length and volume.' : 'Change chords in time without stopping the strumming hand.',
-    start_bpm: 60, target_bpm: 120, current_bpm: 60, drill: `resources:${root}:${name}:${scaleRun ? `position${pos ?? 0}` : `progression${prog}`}`, level: 0,
+    start_bpm: 60, target_bpm: 120, current_bpm: 60, drill: `resources:${root}:${name}:${scaleRun ? `position${pos ?? 0}` : `progression${prog}`}${tuning === OPEN ? '' : `:${tuning}`}`, level: 0,
   }, { onConflict: 'user_id,drill,level', ignoreDuplicates: true }); // adding it twice keeps the first one and its progress
   $('practise-msg').innerHTML = error ? `<span class="error">Could not add it: ${esc(error.message)}</span>` : 'It\'s in your drills. <a href="/practice.html">Open Practice →</a>';
 };
@@ -245,7 +253,7 @@ $('chords').onclick = e => {
   const c = e.target.closest('[data-chord]'), p = e.target.closest('[data-prog]');
   if (c) {
     picked = picked === +c.dataset.chord ? null : +c.dataset.chord;
-    if (picked !== null) strum(chords(root, name)[picked]);
+    if (picked !== null) strum(chords(root, name, tuning)[picked]);
   }
   if (p) {
     prog = prog === +p.dataset.prog ? null : +p.dataset.prog;

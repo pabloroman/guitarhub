@@ -13,7 +13,7 @@
 </header>
 <main style="max-width: 1500px">
   <h1 id="title">Loading…</h1>
-  <p id="meta" class="muted" style="margin-top: 0"></p>
+  <p class="muted" style="margin-top: 0"><span id="meta"></span><span id="key"></span></p>
   <div class="layout">
     <div class="player">
       <div class="at-controls"></div>
@@ -112,6 +112,7 @@
 import { db } from '/db.js';
 import { alphaTab, createPlayer, tuningLabel, guitarTracks, barTempos } from '/player.js';
 import { optimize, STYLES } from '/optimizer.js';
+import { guessKey, scale } from '/theory.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
@@ -134,6 +135,15 @@ const noteAt = (st, c) => st.bars[c.bar]?.voices[0]?.beats[c.beat]?.notes[c.note
 const same = (a, b) => a.string === b.string && a.fret === b.fret;
 const key = c => `${c.bar}.${c.beat}.${c.note}`;
 const rerender = () => api.renderScore(api.score, [trackIndex]);
+
+// The key the track is probably in, from how long each pitch sounds, linking to its scale on this track's tuning.
+function showKey() {
+  const st = staff(), weights = Array(12).fill(0);
+  for (const bar of st.bars) for (const beat of bar.voices[0].beats) for (const n of beat.notes) weights[n.realValue % 12] += beat.playbackDuration;
+  if (!weights.some(Boolean)) return $('key').replaceChildren();
+  const key = guessKey(weights), query = new URLSearchParams({ root: key.root, scale: key.scale, tuning: [...st.tuning].reverse() });
+  $('key').innerHTML = `${$('meta').textContent && ' · '}Probably in ${scale(key.root, key.scale)[0].name} ${key.scale.toLowerCase()} · <a href="/resources.html?${query}">see the scale</a>`;
+}
 
 // Move notes to `dir` ('to' | 'from'), only where the note is still where we expect it.
 function apply(st, changes, dir) {
@@ -167,12 +177,13 @@ api.scoreLoaded.on(score => {
   $('target').value = score.tempo;
   if (trackIndex !== 0) api.renderTracks([score.tracks[trackIndex]]);
   fingStatus();
+  showKey();
 });
 const file = await db.storage.from('tabs').download(tab.file);
 if (file.error) { $('meta').innerHTML = `<span class="error">Could not load the tab file: ${esc(file.error.message)}</span>`; throw file.error; }
 api.load(await file.data.arrayBuffer());
 
-$('track').onchange = e => { if (pending) discard(); trackIndex = +e.target.value; rerender(); fingStatus(); };
+$('track').onchange = e => { if (pending) discard(); trackIndex = +e.target.value; rerender(); fingStatus(); showKey(); };
 
 // ---------- fingering ----------
 

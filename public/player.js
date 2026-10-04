@@ -43,7 +43,7 @@ export function createPlayer(root) {
     player: {
       playerMode: 'EnabledSynthesizer',
       soundFont: '/vendor/soundfont/sonivox.sf2',
-      scrollElement: root.querySelector('.at-scroll') ?? 'html',
+      nativeBrowserSmoothScroll: false, // native smooth scroll ignores the durations the scroll handler below passes
       enableUserInteraction: true, // click to seek, drag to select a loop range
     },
   });
@@ -59,8 +59,36 @@ export function createPlayer(root) {
     <button class="print" disabled>${ICONS.printer} Print</button>
     <span class="status muted">Loading sound…</span>`;
   const $ = s => c.querySelector(s);
-  // Auto-scroll puts the current bar at the viewport top; keep it below the sticky controls (height changes when they wrap).
-  new ResizeObserver(() => { api.settings.player.scrollOffsetY = -c.offsetHeight - 8; }).observe(c);
+  // Auto-scroll keeps the playing position in the middle of the area below the sticky controls, gliding down
+  // each line as the cursor crosses it (no jump when a line starts). A selected range that fits on screen is
+  // centred once and then left still, so looping it never scrolls.
+  let lastRangeY = null;
+  api.customScrollHandler = {
+    [Symbol.dispose]() {},
+    forceScrollTo(b) { lastRangeY = null; this.onBeatCursorUpdating(b, undefined, 0, b.realBounds.x, b.realBounds.x, 0); },
+    onBeatCursorUpdating(beat, _next, _mode, _startX, endX, ms) {
+      const ui = api.uiFacade, scroll = ui.getScrollContainer();
+      const viewTop = c.offsetHeight + 8, viewH = innerHeight - viewTop;
+      const centre = y => ui.getOffset(scroll, api.container).y + y - viewTop - viewH / 2;
+      const system = m => api.boundsLookup.findMasterBarByIndex(m.index).staffSystemBounds.realBounds;
+      const r = api.playbackRange;
+      if (r) {
+        const bars = api.score.masterBars;
+        const first = system(bars.filter(m => m.start <= r.startTick).at(-1));
+        const last = system(bars.filter(m => m.start < r.endTick).at(-1));
+        if (last.y + last.h - first.y <= viewH) {
+          const y = centre((first.y + last.y + last.h) / 2);
+          if (y !== lastRangeY) ui.scrollToY(scroll, (lastRangeY = y), api.settings.player.scrollSpeed);
+          return;
+        }
+      }
+      lastRangeY = null;
+      // drift one line height per line, with the middle of the staves crossing the centre halfway through it
+      const bar = beat.barBounds.masterBarBounds, s = bar.staffSystemBounds.realBounds, v = bar.visualBounds;
+      const t = Math.min(Math.max((endX - s.x) / s.w, 0), 1);
+      ui.scrollToY(scroll, centre(v.y + v.h / 2 + s.h * (t - 0.5)), ms);
+    },
+  };
 
   // Tempo of the passage being played: the bar where the loop selection starts (bar 1 without one).
   let tempos = [];

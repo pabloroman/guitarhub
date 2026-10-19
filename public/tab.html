@@ -28,8 +28,8 @@
       <section class="panel">
         <h2>Speed trainer <span class="help" tabindex="0">?<span class="tip" role="tooltip">Loops the selected bars and speeds up every few loops.</span></span></h2>
         <div class="row">
-          <div style="flex:1"><label for="tr-from">Start</label><span class="unit" data-unit="%"><input id="tr-from" type="number" min="25" max="150" step="5" value="70"></span></div>
-          <div style="flex:1"><label for="tr-target">Target</label><span class="unit" data-unit="%"><input id="tr-target" type="number" min="25" max="150" step="5" value="100"></span></div>
+          <div style="flex:1"><label for="tr-from">Start</label><span class="unit" data-unit="%"><input id="tr-from" type="number" min="5" max="150" step="5" value="70"></span></div>
+          <div style="flex:1"><label for="tr-target">Target</label><span class="unit" data-unit="%"><input id="tr-target" type="number" min="5" max="150" step="5" value="100"></span></div>
         </div>
         <div class="row">
           <div style="flex:1"><label for="tr-step">Step</label><span class="unit" data-unit="%"><input id="tr-step" type="number" min="1" max="50" value="5"></span></div>
@@ -292,7 +292,7 @@ function trainerStatus(msg) {
   else if (!trainer) $('tr-status').textContent = api.playbackRange ? '' : 'Tip: drag across bars to pick a passage, otherwise the whole song loops.';
   else {
     const pct = api.speedPct(), speed = `${pct}% (${api.currentBpm()} bpm)`;
-    $('tr-status').textContent = pct >= num('tr-target', 25) ? `Target reached at ${speed}: keep going or log it.`
+    $('tr-status').textContent = pct >= num('tr-target', 5) ? `Target reached at ${speed}: keep going or log it.`
       : `Loop ${trainer.loops + 1} of ${num('tr-every', 1)} · ${speed}`;
   }
 }
@@ -301,7 +301,7 @@ function trainerRunning(on) {
 }
 $('tr-start').onclick = () => {
   api.setLooping(true);
-  api.setSpeed(num('tr-from', 25));
+  api.setSpeed(num('tr-from', 5));
   if (!api.play()) return trainerStatus('The sound is still loading, try again in a moment.');
   trainer = { loops: 0 };
   trainerRunning(true);
@@ -310,7 +310,7 @@ $('tr-start').onclick = () => {
 $('tr-stop').onclick = () => { trainer = null; api.stop(); trainerRunning(false); trainerStatus(); };
 $('tr-slower').onclick = () => {
   trainer.loops = 0;
-  api.setSpeed(Math.max(25, api.speedPct() - num('tr-step', 1)));
+  api.setSpeed(Math.max(5, api.speedPct() - num('tr-step', 1)));
   trainerStatus();
 };
 // fires at the end of every loop; reads the current speed, so manual slider changes become the new level
@@ -318,7 +318,7 @@ api.playerFinished.on(() => {
   if (!trainer) return;
   if (++trainer.loops >= num('tr-every', 1)) {
     trainer.loops = 0;
-    api.setSpeed(Math.min(num('tr-target', 25), api.speedPct() + num('tr-step', 1)));
+    api.setSpeed(Math.min(num('tr-target', 5), api.speedPct() + num('tr-step', 1)));
   }
   trainerStatus();
 });

@@ -52,7 +52,7 @@ export function createPlayer(root) {
   c.innerHTML = `
     <button class="play icon" disabled aria-label="Play">${ICONS.play}</button>
     <button class="stop icon" disabled aria-label="Stop">${ICONS.stop}</button>
-    <label class="speed-l"><span class="muted">Speed</span> <input class="speed" type="range" min="25" max="150" step="5" value="100"> <output class="speed-out">100%</output></label>
+    <label class="speed-l"><span class="muted">Speed</span> <input class="speed" type="range" min="5" max="150" step="5" value="100"> <output class="speed-out">100%</output></label>
     <button class="toggle loop" aria-pressed="false">${ICONS.loop} Loop</button>
     <button class="toggle metro" aria-pressed="false">${ICONS.note} Metronome</button>
     <button class="toggle countin" aria-pressed="false">${ICONS.clock} Count-in</button>

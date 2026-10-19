@@ -51,7 +51,6 @@
     </div>
   </div>
 </main>
-<script src="/supabase/supabase.js"></script>
 <script type="module">
 import { db } from '/db.js';
 import { createPlayer } from '/player.js';
@@ -79,14 +78,18 @@ const levelRow = (d, level) => {
   return { title: `${d.name} ${level + 1}: ${l.title}`, goal: l.goal, technique: d.name, alphatex: l.alphatex,
     start_bpm: l.start_bpm, target_bpm: l.target_bpm, current_bpm: l.start_bpm, drill: d.key, level };
 };
-const fetchExercises = () => db.from('exercises').select().order('created_at', { ascending: false }).order('id', { ascending: false });
+const fetchExercises = async () => {
+  const r = await db.all('exercises');
+  r.data?.sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+  return r;
+};
 
 async function load() {
   let { data, error } = await fetchExercises();
   // first visit, or a drill was deleted: start every missing drill at its first level
   const missing = error ? [] : DRILLS.filter(d => !data.some(e => e.drill === d.key));
   if (missing.length) {
-    ({ error } = await db.from('exercises').upsert(missing.map(d => levelRow(d, 0)), { onConflict: 'user_id,drill,level', ignoreDuplicates: true }));
+    ({ error } = await db.add('exercises', missing.map(d => levelRow(d, 0)), 'ignore'));
     if (!error) ({ data, error } = await fetchExercises());
   }
   if (error) { $('drills').innerHTML = `<p class="error">Could not load your drills: ${esc(error.message)}</p>`; return; }
@@ -128,13 +131,13 @@ side.addEventListener('keydown', e => { const c = e.target.closest('.card'); if 
 async function run(clean) {
   $('clean').disabled = $('sloppy').disabled = true; // a double click would log twice from the same tempo
   let unlocked;
-  let { error } = await db.from('sessions').insert({ exercise_id: cur.id, bpm: cur.current_bpm, target_bpm: cur.target_bpm, notes: clean ? 'clean' : 'sloppy' });
+  let { error } = await db.add('sessions', { exercise_id: cur.id, bpm: cur.current_bpm, target_bpm: cur.target_bpm, notes: clean ? 'clean' : 'sloppy' });
   if (clean && !error) {
     const bpm = cur.current_bpm + 5, d = DRILLS.find(d => d.key === cur.drill), next = cur.level + 1;
-    ({ error } = await db.from('exercises').update({ current_bpm: bpm }).eq('id', cur.id));
+    ({ error } = await db.update('exercises', cur.id, { current_bpm: bpm }));
     if (!error && bpm >= cur.target_bpm && d?.levels[next] && !exercises.some(e => e.drill === d.key && e.level === next)) {
-      const r = await db.from('exercises').insert(levelRow(d, next)).select('id').single();
-      error = r.error; unlocked = r.data?.id;
+      const r = await db.add('exercises', levelRow(d, next));
+      error = r.error; unlocked = r.data?.[0]?.id;
     }
   }
   await load();
@@ -147,7 +150,7 @@ $('clean').onclick = () => run(true);
 $('sloppy').onclick = () => run(false);
 $('delete').onclick = async () => {
   if (!confirm(`Delete "${cur.title}"?`)) return;
-  const { error } = await db.from('exercises').delete().eq('id', cur.id);
+  const { error } = await db.del('exercises', cur.id);
   if (error) { $('run-msg').innerHTML = `<span class="error">Could not delete: ${esc(error.message)}</span>`; return; }
   cur = null;
   load();
@@ -161,12 +164,14 @@ const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')
 const today = ymd(new Date());
 
 async function loadCalendar() {
-  // ponytail: Supabase returns at most 1000 rows, so this is the newest 1000 runs; beyond that older months go blank
-  // and the streak tops out. Fetch only the visible month, and count the streak in SQL, when that starts to show.
-  const { data, error } = await db.from('sessions').select('*, tabs(title), exercises(title)') // *: `activity` only exists once the schema has it
-    .order('at', { ascending: false });
+  // ponytail: every session ever, every time; fetch only the visible month, and count the streak in SQL, if that gets slow
+  const [r, tabs, ex] = await Promise.all([db.all('sessions'), db.all('tabs'), db.all('exercises')]);
+  const error = r.error ?? tabs.error ?? ex.error;
   if (error) { $('cal-day').innerHTML = `<span class="error">Could not load the calendar: ${esc(error.message)}</span>`; return; }
-  sessions = data.map(s => ({ ...s, day: ymd(new Date(s.at)), what: s.tabs?.title ?? s.exercises?.title ?? s.activity }));
+  // a deleted tab or exercise leaves its sessions behind, shown as "Deleted exercise"
+  const title = new Map([...tabs.data.map(t => [`t${t.id}`, t.title]), ...ex.data.map(e => [`e${e.id}`, e.title])]);
+  sessions = r.data.sort((a, b) => b.at.localeCompare(a.at))
+    .map(s => ({ ...s, day: ymd(new Date(s.at)), what: title.get(`t${s.tab_id}`) ?? title.get(`e${s.exercise_id}`) ?? s.activity }));
   day ??= today;
   renderCalendar();
 }

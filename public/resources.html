@@ -93,7 +93,6 @@
   <div id="chords"></div>
   </section>
 </main>
-<script src="/supabase/supabase.js"></script>
 <script type="module">
 import { db } from '/db.js';
 import { alphaTab, createPlayer } from '/player.js';
@@ -258,7 +257,7 @@ async function finish() {
   game.over = true;
   renderTrainer();
   if (!game.score && !game.missed) return; // nothing was played
-  const { error } = await db.from('sessions').insert({ activity: 'Fretboard notes', notes: `${game.mode === 'find' ? 'Find' : 'Name'} the note: ${game.score} right, ${game.missed} missed` });
+  const { error } = await db.add('sessions', { activity: 'Fretboard notes', notes: `${game.mode === 'find' ? 'Find' : 'Name'} the note: ${game.score} right, ${game.missed} missed` });
   $('trainer-msg').innerHTML = error ? `<span class="error">This round was not logged: ${esc(error.message)}</span>` : 'Logged to your <a href="/practice.html">Practice calendar</a>.';
 }
 
@@ -377,11 +376,11 @@ $('circle').onclick = $('circle').onkeydown = pickKey;
 // what the player is showing becomes a drill on the Practice page, with the same tempo ladder as the built-in ones
 $('practise').onclick = async () => {
   const scaleRun = prog === null, kind = scale(root, name).length === 7 && system === 'caged' ? 'caged' : 'position';
-  const { error } = await db.from('exercises').upsert({
+  const { error } = await db.add('exercises', {
     title: $('tab-title').textContent, technique: scaleRun ? 'Scale' : 'Chord changes', alphatex: loaded,
     goal: scaleRun ? 'Even 8th notes up and back down, every note the same length and volume.' : 'Change chords in time without stopping the strumming hand.',
     start_bpm: 60, target_bpm: 120, current_bpm: 60, drill: `resources:${root}:${name}:${scaleRun ? `${kind}${pos ?? 0}` : `progression${prog}`}${tuning === OPEN ? '' : `:${tuning}`}`, level: 0,
-  }, { onConflict: 'user_id,drill,level', ignoreDuplicates: true }); // adding it twice keeps the first one and its progress
+  }, 'ignore'); // adding it twice keeps the first one and its progress
   $('practise-msg').innerHTML = error ? `<span class="error">Could not add it: ${esc(error.message)}</span>` : 'It\'s in your drills. <a href="/practice.html">Open Practice →</a>';
 };
 

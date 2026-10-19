@@ -1,0 +1,19 @@
+name = "guitarhub"
+compatibility_date = "2026-10-01"
+pages_build_output_dir = "dist"
+
+# The Access application in front of the site (Zero Trust → Access → Applications): its team domain and
+# "Application Audience (AUD) Tag". functions/api/_middleware.js checks every API request's JWT against them.
+[vars]
+ACCESS_DOMAIN = "https://guitarhub.cloudflareaccess.com"
+ACCESS_AUD = "3ab2f0e2fdc54d5313307792048c6dc586ddb1086ad37ae3ff0863dbcefa513e"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "guitarhub"
+database_id = "e7cf2dc1-c1b4-4e83-b0d7-fa2f0383eb5d"
+
+# the Guitar Pro files, keyed `<user email>/<tab id>`
+[[kv_namespaces]]
+binding = "FILES"
+id = "65a215d4b1fc4b0e8222a76944790063"

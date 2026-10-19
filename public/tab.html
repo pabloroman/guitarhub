@@ -107,7 +107,6 @@
     </aside>
   </div>
 </main>
-<script src="/supabase/supabase.js"></script>
 <script type="module">
 import { db } from '/db.js';
 import { alphaTab, createPlayer, tuningLabel, guitarTracks, barTempos } from '/player.js';
@@ -117,17 +116,18 @@ import { guessKey, scale } from '/theory.js';
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 const id = new URLSearchParams(location.search).get('id');
-// someone else's tab comes back empty too: the database only returns the signed-in user's rows
-const { data: tab } = await db.from('tabs').select('*, fingerings(track, changes), sessions(*)').eq('id', id)
-  .order('at', { referencedTable: 'sessions', ascending: false }).maybeSingle();
+// someone else's tab comes back empty too: the API only returns the signed-in user's rows
+const [{ data: [tab] = [] }, fingerings, sessions] = await Promise.all([
+  db.all('tabs', { id }), db.all('fingerings', { tab_id: id }), db.all('sessions', { tab_id: id })]);
 if (!tab) { $('title').textContent = 'Tab not found'; throw new Error('not found'); }
+tab.sessions = (sessions.data ?? []).sort((a, b) => b.at.localeCompare(a.at));
 $('title').textContent = tab.title;
 $('meta').textContent = [tab.artist, tab.tuning, tab.tempo && `${tab.tempo} bpm`, tab.tags].filter(Boolean).join(' · ');
 document.title = `GuitarHub · ${tab.title}`;
 
 const api = createPlayer(document.querySelector('.player'));
 // { trackIndex: [change] }, `from` is always the file's original fingering
-const saved = Object.fromEntries(tab.fingerings.map(f => [f.track, f.changes]));
+const saved = Object.fromEntries((fingerings.data ?? []).map(f => [f.track, JSON.parse(f.changes)]));
 let trackIndex = 0, pending = null, ready = false;
 
 const staff = () => api.score.tracks[trackIndex].staves[0];
@@ -179,9 +179,9 @@ api.scoreLoaded.on(score => {
   fingStatus();
   showKey();
 });
-const file = await db.storage.from('tabs').download(tab.file);
+const file = await db.file.get(id);
 if (file.error) { $('meta').innerHTML = `<span class="error">Could not load the tab file: ${esc(file.error.message)}</span>`; throw file.error; }
-api.load(await file.data.arrayBuffer());
+api.load(file.data);
 
 $('track').onchange = e => { if (pending) discard(); trackIndex = +e.target.value; rerender(); fingStatus(); showKey(); };
 
@@ -248,7 +248,7 @@ $('discard').onclick = discard;
 
 // Saves before anything on screen changes: on failure it says so and returns false, leaving things as they were for a retry.
 async function saveFingering(changes) {
-  const { error } = await db.from('fingerings').upsert({ tab_id: +id, track: trackIndex, changes });
+  const { error } = await db.add('fingerings', { tab_id: +id, track: trackIndex, changes: JSON.stringify(changes) }, 'replace');
   if (error) $('fing-status').textContent = `Could not save: ${error.message}`;
   return !error;
 }
@@ -350,7 +350,7 @@ $('log').onsubmit = async e => {
   const from = +$('bar-from').value || null, to = +$('bar-to').value || from;
   const s = { tab_id: +id, bars: from ? `${from}-${to}` : '', bpm: +$('bpm').value || null, target_bpm: +$('target').value || null,
     rating: +$('rating').value, notes: $('notes').value };
-  const { data: row, error } = await db.from('sessions').insert(s).select().single();
+  const { data: [row] = [], error } = await db.add('sessions', s);
   $('log-msg').textContent = error ? `Could not save: ${error.message}` : 'Saved.';
   if (!error) {
     $('notes').value = '';

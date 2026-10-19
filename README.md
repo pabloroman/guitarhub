@@ -11,31 +11,33 @@ A small web app for practicing guitar from Guitar Pro tabs:
 - **Practice log**: on any tab, log what you practiced (bars, clean tempo, what felt hard).
 - **Resources**: pick a root and a scale (major, minor, pentatonics, blues, harmonic minor or a mode), from the dropdowns or on a circle of fifths, to see the scale across the fretboard, as note names or degrees, and the key's chords as chord boxes with their Roman numerals. Step through the scale's hand positions one at a time (the five CAGED positions, each named after the chord shape it sits around, or three notes per string) and play each as tab, right under the neck, pick a chord to hear it and see where its notes sit on the neck, or loop a common progression in the key to play along with. The theory terms on the page (degrees, CAGED, Roman numerals, each scale…) are explained in **?** hints next to them. Any of these can be added to your Practice drills, with the same tempo ladder as the built-in ones. A **chord finder** shows up to six ways to play any chord (triads, sus, 6ths, 7ths, 9ths) from the nut up the neck. Everything can be shown in other tunings (Drop D, DADGAD, open tunings…), and each tab's page guesses the key it's in and links to that scale in the tab's own tuning. A **note trainer** has two 60-second games for learning the neck, find every place a note sits or name the note shown, and logs each round to the Practice calendar.
 
-Sign in with Google and you get your own private library. Tabs, fingering edits and the practice log are stored in [Supabase](https://supabase.com), so they follow you to any browser.
+Sign in with Google and you get your own private library. Tabs, fingering edits and the practice log are stored on [Cloudflare](https://developers.cloudflare.com) (a D1 database plus KV for the tab files), so they follow you to any browser.
 
 ## Running your own copy
 
-You need [Node.js](https://nodejs.org) 20 or newer and a free Supabase project.
-
-1. In Supabase, create a project and run `supabase/schema.sql` in the SQL editor. It creates the tables, the file bucket and the access rules that keep each user's data private. A project set up before the note trainer existed needs one more line, or its rounds aren't logged: `alter table sessions add column activity text;`
-2. Under Authentication → Providers, turn **Email** off and turn **Google** on, using an OAuth client from Google Cloud whose redirect URI is `https://<project ref>.supabase.co/auth/v1/callback`.
-3. Under Authentication → URL Configuration, add `http://localhost:3000/` and your site's URL to the redirect URLs.
-4. Put the project URL and publishable key in `public/db.js`. Both are meant to be public; the access rules in `schema.sql` are what protect the data.
+You need [Node.js](https://nodejs.org) 20 or newer.
 
 ```sh
 git clone https://github.com/pabloroman/guitarhub.git
 cd guitarhub
 npm install
+npx wrangler d1 execute guitarhub --local --file=schema.sql   # once: creates the local database's tables
 npm start
 ```
 
-Then open http://localhost:3000. Use `localhost`, not `127.0.0.1`, or the Google sign-in can't redirect back. The dev server only serves files; it uses the same Supabase project as the hosted site.
+Then open http://localhost:8788. `npm start` builds the site into `dist/` and runs it with `wrangler pages dev`, with a local database and file store under `.wrangler/` and no sign-in: every request is one dev user. It serves the built copy, so restart it after editing files in `public/`.
 
 ## Deploying
 
-The site is static. `npm run build` assembles it in `dist/`, and `vercel.json` tells [Vercel](https://vercel.com) to run that on every push to `main`.
+The site runs on [Cloudflare Pages](https://developers.cloudflare.com/pages/), all on the free plan. Set-up, once:
 
-Supabase's free tier may pause a project after about a week with little activity. Nothing is lost and it can be resumed from the dashboard, but the site is down until then. The free tier also has no backups.
+1. `npx wrangler login`, then `npx wrangler d1 create guitarhub` and `npx wrangler kv namespace create FILES`. Put the two ids they print in `wrangler.toml`, and create the tables with `npx wrangler d1 execute guitarhub --remote --file=schema.sql`.
+2. In the Cloudflare dashboard, create a Pages project from this GitHub repo, with build command `npm run build` and output directory `dist`. Every push to `main` then deploys.
+3. Under Zero Trust → Access, add Google as a login method and a self-hosted application for the project's address (e.g. `guitarhub-4tl.pages.dev`) and its preview wildcard (`*.guitarhub-4tl.pages.dev`), with a policy that allows your email (and anyone else who should have a library). Put your team domain and the application's AUD tag in `wrangler.toml` under `[vars]`.
+
+Access asks for the Google sign-in before any page loads, and `functions/api/` checks its token on every request, so each user only reads and writes their own rows and files.
+
+D1 keeps a 7-day history on the free plan: `npx wrangler d1 time-travel restore guitarhub --timestamp=<when>` rolls the database back.
 
 ## Tests
 
@@ -65,7 +67,7 @@ The weights are at the top of `optimizer.js`. They're tuned against the test cas
 ## Stack
 
 - Plain HTML and JavaScript, with no framework and no bundler: the build only copies files.
-- [Supabase](https://supabase.com) for the database, tab files and sign-in. The browser talks to it directly, and row-level security keeps each user's data private.
+- [Cloudflare](https://developers.cloudflare.com): Pages for hosting, Access for the Google sign-in, D1 (SQLite) for the data and KV for the tab files. `functions/api/` is the whole backend: a small API over the tables that only ever touches the signed-in user's rows.
 - [alphaTab](https://alphatab.net) for parsing, rendering and playing the tabs.
 
 ## How the PDF import works

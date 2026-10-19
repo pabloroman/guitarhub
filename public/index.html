@@ -42,9 +42,8 @@
     </div>
   </form>
 </dialog>
-<script src="/supabase/supabase.js"></script>
 <script type="module">
-import { db, user } from '/db.js';
+import { db } from '/db.js';
 import { alphaTab, tuningLabel, guitarTracks } from '/player.js';
 import { pdfToTex } from '/pdftab.js';
 
@@ -55,14 +54,13 @@ const splitTags = s => (s ?? '').split(',').map(t => t.trim()).filter(Boolean);
 const TRASH = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>';
 
 async function load() {
-  // ponytail: Supabase returns at most 1000 rows, so a bigger library loses its alphabetical tail. Page it then.
-  const { data, error } = await db.from('tabs').select().order('artist').order('title');
+  const { data, error } = await db.all('tabs');
   if (error) { $('list').innerHTML = `<tr><td colspan="6">${err('Could not load your library', error)}</td></tr>`; return; }
-  // filtered here, not in the query: no user input to escape into a PostgREST filter
   const q = $('q').value.trim().toLowerCase();
-  const tabs = data.filter(t => [t.title, t.artist, t.tags].some(s => (s ?? '').toLowerCase().includes(q)));
+  const tabs = data.filter(t => [t.title, t.artist, t.tags].some(s => (s ?? '').toLowerCase().includes(q)))
+    .sort((a, b) => (a.artist ?? '').localeCompare(b.artist ?? '') || (a.title ?? '').localeCompare(b.title ?? ''));
   $('list').innerHTML = tabs.map(t => `
-    <tr data-id="${t.id}" data-file="${esc(t.file)}">
+    <tr data-id="${t.id}">
       <td><a href="/tab.html?id=${t.id}">${esc(t.title)}</a></td>
       <td>${esc(t.artist)}</td>
       <td class="muted">${esc(t.tuning)}</td>
@@ -73,7 +71,7 @@ async function load() {
 }
 
 async function saveTags(td, tags) {
-  const { error } = await db.from('tabs').update({ tags: [...new Set(tags)].join(', ') }).eq('id', td.closest('tr').dataset.id);
+  const { error } = await db.update('tabs', td.closest('tr').dataset.id, { tags: [...new Set(tags)].join(', ') });
   if (error) $('msg').innerHTML = err('Could not save tags', error);
   load();
 }
@@ -95,9 +93,7 @@ $('list').addEventListener('click', async e => {
   if (btn.matches('.del')) {
     const tr = btn.closest('tr');
     if (!confirm(`Delete "${tr.querySelector('a').textContent}"? This removes the file and its fingering edits.`)) return;
-    // file first: if the row went first and the file removal failed, nothing would point at the file any more
-    let { error } = await db.storage.from('tabs').remove([tr.dataset.file]);
-    if (!error) ({ error } = await db.from('tabs').delete().eq('id', tr.dataset.id));
+    const { error } = await db.del('tabs', tr.dataset.id); // the API removes its fingerings and file too
     if (error) $('msg').innerHTML = err('Could not delete', error);
     load();
   }
@@ -153,12 +149,11 @@ $('files').onchange = async e => {
     }
     const guitar = guitarTracks(score)[0];
     const title = score.title || name.replace(/\.\w+$/, '');
-    const path = `${user.id}/${crypto.randomUUID()}${name.match(/\.\w+$/)?.[0].toLowerCase() ?? ''}`;
-    let { error } = await db.storage.from('tabs').upload(path, bytes, { contentType: 'application/octet-stream' });
+    let { data: rows, error } = await db.add('tabs', { title, artist: score.artist || '',
+      tuning: guitar ? tuningLabel(guitar.staves[0]) : '', tempo: score.tempo || null });
     if (!error) {
-      ({ error } = await db.from('tabs').insert({ file: path, title, artist: score.artist || '',
-        tuning: guitar ? tuningLabel(guitar.staves[0]) : '', tempo: score.tempo || null }));
-      if (error) await db.storage.from('tabs').remove([path]); // don't keep a file no row points at
+      ({ error } = await db.file.put(rows[0].id, bytes));
+      if (error) await db.del('tabs', rows[0].id); // don't keep a row with no file to open
     }
     done.push(error ? err(file.name, error) : `Added ${esc(title)}`);
   }

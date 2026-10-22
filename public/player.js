@@ -125,11 +125,6 @@ export function createPlayer(root) {
   toggle('.loop', on => { api.isLooping = on; });
   toggle('.metro', on => { api.metronomeVolume = on ? 1 : 0; });
   toggle('.countin', on => { api.countInVolume = on ? 1 : 0; });
-  // alphaTab only counts in when playback starts and loops straight back, so restart each loop to count in again
-  api.playerFinished.on(() => {
-    if (!api.isLooping || !api.countInVolume) return;
-    setTimeout(() => { api.pause(); api.tickPosition = api.playbackRange?.startTick ?? 0; api.play(); });
-  });
   // alphaTab opens an A4-sized popup with the current track(s) and calls the browser's print dialog
   $('.print').onclick = () => api.print();
 
